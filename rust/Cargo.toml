@@ -1,0 +1,14 @@
+[package]
+name = "loadtxt"
+version = "0.1.0"
+authors = ["Ben Kimock <kimockb@gmail.com>"]
+build = "build.rs"
+
+[dependencies]
+
+[build-dependencies]
+cbindgen = "0.5.2"
+
+[lib]
+crate-type = ["cdylib"]
+
