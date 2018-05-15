@@ -5,6 +5,7 @@ authors = ["Ben Kimock <kimockb@gmail.com>"]
 build = "build.rs"
 
 [dependencies]
+rayon = "1.0"
 
 [build-dependencies]
 cbindgen = "0.5.2"
