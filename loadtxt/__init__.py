@@ -2,17 +2,19 @@ import numpy as np
 from loadtxt._native import ffi, lib
 
 
-def loadtxt(filename, skiprows=0):
+def loadtxt(filename, comments='#', skiprows=0, transpose=False):
     row_ptr = ffi.new("uint64_t *")
     col_ptr = ffi.new("uint64_t *")
 
-    data_ptr = lib.loadtxt(filename.encode(), skiprows, row_ptr, col_ptr)
+    data_ptr = lib.loadtxt(filename.encode(), comments.encode(), skiprows, row_ptr, col_ptr)
     rows = row_ptr[0]
     columns = col_ptr[0]
 
     buf = ffi.buffer(data_ptr, 8 * rows * columns)
     array = np.frombuffer(buf, dtype=np.float64, count=rows * columns)
     array.shape = (rows, columns)
+    if transpose:
+        array = np.transpose(array)
     return array
 
 

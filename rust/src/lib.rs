@@ -8,11 +8,14 @@ use std::os::raw::{c_char, c_int};
 #[no_mangle]
 pub unsafe extern "C" fn loadtxt(
     filename: *const c_char,
+    comments: *const c_char,
     skiprows: c_int,
     rows: *mut u64,
     cols: *mut u64,
 ) -> *const f64 {
     let filename = CStr::from_ptr(filename).to_str().unwrap();
+    let comments = CStr::from_ptr(comments).to_str().unwrap();
+
     let all_contents = fs::read_to_string(filename).unwrap();
 
     // Skip rows before trimming whitespace
@@ -30,16 +33,21 @@ pub unsafe extern "C" fn loadtxt(
     let mut data = Vec::with_capacity((*rows * *cols) as usize);
 
     data.par_extend(
-        rayon::iter::split(contents, |data| {
-            let guess = data.len() / 2;
-            let additional_jump = data[guess..].find('\n');
-            if let Some(i) = additional_jump {
-                (&data[..guess + i], Some(&data[guess + i..]))
-            } else {
-                (data, None)
-            }
-        }).flat_map(|chunk| chunk.par_split_whitespace().map(|x| x.parse::<f64>().unwrap()))
+        contents
+            .par_lines()
+            .filter(|l| !l.starts_with(comments))
+            .flat_map(|l| l.par_split_whitespace().map(|x| x.parse::<f64>().unwrap())),
     );
+
+    /*
+    data.extend(
+        contents
+            .lines()
+            .filter(|l| !l.starts_with(comments))
+            .flat_map(|l| l.split_whitespace().map(|x| x.parse::<f64>().unwrap())),
+    );
+    */
+
     assert_eq!(data.len(), (*rows * *cols) as usize);
 
     let ptr = data.as_ptr();
