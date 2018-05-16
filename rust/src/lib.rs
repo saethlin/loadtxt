@@ -9,25 +9,37 @@ use std::os::raw::{c_char, c_int};
 pub unsafe extern "C" fn loadtxt(
     filename: *const c_char,
     skiprows: c_int,
-    rows: *mut c_int,
-    cols: *mut c_int,
+    rows: *mut u64,
+    cols: *mut u64,
 ) -> *const f64 {
     let filename = CStr::from_ptr(filename).to_str().unwrap();
     let all_contents = fs::read_to_string(filename).unwrap();
 
-    let contents = all_contents.trim();
+    // Skip rows before trimming whitespace
+    let contents = all_contents
+        .splitn(skiprows as usize + 1, '\n')
+        .last()
+        .unwrap()
+        .trim();
 
-    *rows = contents.lines().count() as i32 - skiprows;
-    let first_line = contents.lines().skip(skiprows as usize).next().unwrap();
-    *cols = first_line.split_whitespace().count() as i32;
+    *rows = contents.lines().count() as u64;
 
-    let mut data = Vec::new();
-    for line in contents.lines().skip(skiprows as usize) {
-        for val in line.split_whitespace() {
-            data.push(val.parse().unwrap());
-        }
-    }
+    let first_line = contents.lines().next().unwrap();
+    *cols = first_line.split_whitespace().count() as u64;
 
+    let mut data = Vec::with_capacity((*rows * *cols) as usize);
+
+    data.par_extend(
+        rayon::iter::split(contents, |data| {
+            let guess = data.len() / 2;
+            let additional_jump = data[guess..].find('\n');
+            if let Some(i) = additional_jump {
+                (&data[..guess + i], Some(&data[guess + i..]))
+            } else {
+                (data, None)
+            }
+        }).flat_map(|chunk| chunk.par_split_whitespace().map(|x| x.parse::<f64>().unwrap()))
+    );
     assert_eq!(data.len(), (*rows * *cols) as usize);
 
     let ptr = data.as_ptr();
