@@ -16,37 +16,33 @@ pub unsafe extern "C" fn loadtxt(
     let filename = CStr::from_ptr(filename).to_str().unwrap();
     let comments = CStr::from_ptr(comments).to_str().unwrap();
 
-    let all_contents = fs::read_to_string(filename).unwrap();
+    let contents = fs::read_to_string(filename).unwrap();
 
-    // Skip rows before trimming whitespace
-    let contents = all_contents
-        .splitn(skiprows as usize + 1, '\n')
-        .last()
-        .unwrap()
-        .trim();
+    let mut filtered = String::with_capacity(contents.len());
+    let mut num_rows = 0;
+    for line in contents
+        .lines()
+        .skip(skiprows as usize)
+        .filter(|l| !l.starts_with(comments))
+    {
+        filtered.extend(line.chars());
+        filtered.push('\n');
+        num_rows += 1;
+    }
 
-    *rows = contents.lines().count() as u64;
+    std::mem::drop(contents);
 
-    let first_line = contents.lines().next().unwrap();
+    let first_line = filtered.lines().next().unwrap();
     *cols = first_line.split_whitespace().count() as u64;
 
-    let mut data = Vec::with_capacity((*rows * *cols) as usize);
+    *rows = num_rows as u64;
+    let mut data = Vec::with_capacity((*rows * *cols) as usize + 1);
 
     data.par_extend(
-        contents
-            .par_lines()
-            .filter(|l| !l.starts_with(comments))
-            .flat_map(|l| l.par_split_whitespace().map(|x| x.parse::<f64>().unwrap())),
+        filtered
+            .par_split_whitespace()
+            .map(|x| x.parse::<f64>().unwrap()),
     );
-
-    /*
-    data.extend(
-        contents
-            .lines()
-            .filter(|l| !l.starts_with(comments))
-            .flat_map(|l| l.split_whitespace().map(|x| x.parse::<f64>().unwrap())),
-    );
-    */
 
     assert_eq!(data.len(), (*rows * *cols) as usize);
 
