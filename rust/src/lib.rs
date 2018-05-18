@@ -1,4 +1,5 @@
 extern crate rayon;
+extern crate num_cpus;
 use rayon::prelude::*;
 
 use std::ffi::CStr;
@@ -84,7 +85,7 @@ pub unsafe extern "C" fn loadtxt_flat_i64(filename: *const c_char, size: *mut u6
 #[no_mangle]
 pub unsafe extern "C" fn loadtxt_unsafe_i64(filename: *const c_char, size: *mut u64) -> *const i64 {
     let filename = CStr::from_ptr(filename).to_str().unwrap();
-    let ncpu = 4;
+    let ncpu = num_cpus::get();
 
     let bytes = fs::read(filename).unwrap();
     let bytes_ptr = bytes.as_ptr();
