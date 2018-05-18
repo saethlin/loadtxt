@@ -19,3 +19,6 @@ assert np.all(
         skiprows=1) == np.loadtxt(
             'test.txt',
         skiprows=1))
+
+assert np.all(loadtxt.loadtxt_unsafe('test.txt') == np.loadtxt('test.txt').flatten())
+

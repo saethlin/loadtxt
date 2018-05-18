@@ -37,3 +37,13 @@ def loadtxt_flat(filename, dtype=float):
 
     else:
         raise ValueError("Unsupported data type: {}".format(dtype))
+
+
+def loadtxt_unsafe(filename):
+    size_ptr = ffi.new("uint64_t *")
+
+    data_ptr = lib.loadtxt_unsafe_i64(filename.encode(), size_ptr)
+    size = size_ptr[0]
+
+    buf = ffi.buffer(data_ptr, 8 * size)
+    return np.frombuffer(buf, dtype=np.int64, count=size)
