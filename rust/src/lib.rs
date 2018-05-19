@@ -1,10 +1,16 @@
-extern crate rayon;
 extern crate num_cpus;
-use rayon::prelude::*;
+extern crate scoped_threadpool;
 
 use std::ffi::CStr;
 use std::fs;
 use std::os::raw::{c_char, c_int};
+
+#[derive(Default, Clone)]
+struct Chunk<T> {
+    data: Vec<T>,
+    rows: u64,
+    error_line: Option<u64>,
+}
 
 #[no_mangle]
 pub unsafe extern "C" fn loadtxt(
@@ -13,36 +19,93 @@ pub unsafe extern "C" fn loadtxt(
     skiprows: c_int,
     rows: *mut u64,
     cols: *mut u64,
+    has_error: *mut u8,
+    error_line: *mut u64,
 ) -> *const f64 {
+    *rows = 0;
+    *cols = 0;
+    *has_error = 0;
+    *error_line = 0;
+
     let filename = CStr::from_ptr(filename).to_str().unwrap();
     let comments = CStr::from_ptr(comments).to_str().unwrap();
 
+    let ncpu = num_cpus::get();
+
     let contents = fs::read_to_string(filename).unwrap();
+    // handle skiprows
+    let remaining = contents.splitn(skiprows as usize + 1, '\n').last().unwrap().trim();
 
-    let mut filtered = String::with_capacity(contents.len());
+    let first_line = remaining.lines().next().unwrap();
+    let num_cols = first_line.split_whitespace().count();
+    *cols = num_cols as u64;
+    let approx_rows = remaining.len() / first_line.len();
+    let chunksize = remaining.len() / ncpu;
 
-    let mut num_rows = 0;
-    for line in contents
-        .lines()
-        .skip(skiprows as usize)
-        .filter(|l| !l.starts_with(comments))
-    {
-        filtered.extend(line.chars());
-        filtered.push('\n');
-        num_rows += 1;
+    let mut parsed_chunks = vec![Chunk::default(); ncpu];
+    // Divide into chunks for threads
+    scoped_threadpool::Pool::new(ncpu as u32).scoped(|scoped| {
+        let mut slice_begin = 0;
+        for e in &mut parsed_chunks {
+            let mut slice_end = slice_begin + chunksize;
+            if slice_end > remaining.len() {
+                slice_end = remaining.len();
+            } else {
+                while !remaining.is_char_boundary(slice_end)
+                    || remaining.as_bytes()[slice_end] != b'\n'
+                {
+                    slice_end += 1;
+                    if slice_end == remaining.len() {
+                        break;
+                    }
+                }
+            }
+
+            let slice = &remaining[slice_begin..slice_end];
+            scoped.execute(move || {
+                // Cannot use enumerate on rows or these_cols because they must
+                // outlive their iterators
+                let mut error_line = None;
+                let mut rows = 0;
+                let mut data = Vec::with_capacity((approx_rows * num_cols * 2) / ncpu);
+                slice.trim()
+                    .lines()
+                    .filter(|l| !l.starts_with(comments))
+                    .for_each(|l| {
+                        let mut these_cols = 0;
+                        l.split_whitespace().for_each(|s| {
+                            these_cols += 1;
+                            match s.parse() {
+                                Ok(v) => data.push(v),
+                                Err(_) => if error_line.is_none() {error_line = Some(rows)},
+                            };
+                        });
+                        if these_cols != num_cols {
+                            if error_line.is_none() {error_line = Some(rows)}
+                        }
+                        rows += 1;
+                    });
+                *e = Chunk { data, rows, error_line }
+            });
+
+            slice_begin = slice_end;
+        }
+    });
+
+    let mut data =
+        Vec::with_capacity(parsed_chunks.iter().map(|c| c.data.len()).sum::<usize>() + 1);
+    for chunk in parsed_chunks {
+        data.extend_from_slice(&chunk.data);
+        if let Some(line) = chunk.error_line {
+            if *has_error == 0 {
+                *error_line = line + *rows;
+                *has_error = 1;
+            }
+        }
+        *rows += chunk.rows as u64;
     }
-    *rows = num_rows;
 
-    std::mem::drop(contents);
-
-    let first_line = filtered.lines().nth(1).unwrap();
-    *cols = first_line.split_whitespace().count() as u64;
-    let data: Vec<_> = filtered
-        .par_split_whitespace()
-        .map(|x| x.parse::<f64>().unwrap())
-        .collect();
-
-    assert_eq!(data.len(), (*rows * *cols) as usize);
+    //assert_eq!(data.len() as u64, *cols * *rows);
 
     let ptr = data.as_ptr();
     std::mem::forget(data);
@@ -50,77 +113,45 @@ pub unsafe extern "C" fn loadtxt(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn loadtxt_flat_f64(filename: *const c_char, size: *mut u64) -> *const f64 {
-    let filename = CStr::from_ptr(filename).to_str().unwrap();
-
-    let data: Vec<_> = fs::read_to_string(filename)
-        .unwrap()
-        .par_split_whitespace()
-        .map(|x| x.parse().unwrap())
-        .collect();
-
-    *size = data.len() as u64;
-    let ptr = data.as_ptr();
-    std::mem::forget(data);
-    ptr
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn loadtxt_flat_i64(filename: *const c_char, size: *mut u64) -> *const i64 {
-    let filename = CStr::from_ptr(filename).to_str().unwrap();
-
-    let data: Vec<_> = std::fs::read(filename)
-        .unwrap()
-        .par_split(|c| c.is_ascii_whitespace())
-        .filter(|x| x.len() > 0)
-        .map(|x| std::str::from_utf8_unchecked(x).parse().unwrap())
-        .collect();
-
-    *size = data.len() as u64;
-    let ptr = data.as_ptr();
-    std::mem::forget(data);
-    ptr
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn loadtxt_unsafe_i64(filename: *const c_char, size: *mut u64) -> *const i64 {
+pub unsafe extern "C" fn loadtxt_unchecked(filename: *const c_char, size: *mut u64) -> *const i64 {
     let filename = CStr::from_ptr(filename).to_str().unwrap();
     let ncpu = num_cpus::get();
 
     let bytes = fs::read(filename).unwrap();
-    let bytes_ptr = bytes.as_ptr();
     let chunksize = bytes.len() / ncpu;
-    let mut handles = Vec::new();
+    let mut parsed_chunks = vec![Vec::new(); ncpu];
 
-    let mut slice_begin = 0;
-    for _ in 0..ncpu {
-        let mut slice_end = slice_begin + chunksize;
-        if slice_end > bytes.len() {
-            slice_end = bytes.len();
-        } else {
-            while !bytes[slice_end].is_ascii_whitespace() {
-                slice_end += 1;
+    scoped_threadpool::Pool::new(ncpu as u32).scoped(|scoped| {
+        // Break up the bytes into roughly equal-size chunks, but make sure
+        // to only slice on whitespace characters
+        let mut slice_begin = 0;
+        for e in &mut parsed_chunks {
+            let mut slice_end = slice_begin + chunksize;
+            if slice_end > bytes.len() {
+                slice_end = bytes.len();
+            } else {
+                while !bytes[slice_end].is_ascii_whitespace() {
+                    slice_end += 1;
+                }
             }
+
+            let slice = &bytes[slice_begin..slice_end];
+            scoped.execute(move || {
+                *e = slice
+                    .split(|x| x.is_ascii_whitespace())
+                    .filter(|s| s.len() > 0)
+                    .map(|s| parse_unchecked(s))
+                    .collect::<Vec<i64>>();
+            });
+
+            slice_begin = slice_end;
         }
+    });
 
-        let tempstring = std::slice::from_raw_parts(
-            bytes_ptr.offset(slice_begin as isize),
-            slice_end - slice_begin,
-        );
-        handles.push(std::thread::spawn(move || {
-            tempstring
-                .split(|x| x.is_ascii_whitespace())
-                .filter(|s| s.len() > 0)
-                .map(|s| parse_unchecked(s))
-                .collect::<Vec<i64>>()
-        }));
 
-        slice_begin = slice_end;
-    }
-
-    let mut data = Vec::with_capacity(bytes.capacity());
-    for handle in handles {
-        data.extend_from_slice(&handle.join().unwrap());
+    let mut data = Vec::with_capacity(parsed_chunks.iter().map(|c| c.len()).sum::<usize>() + 1);
+    for chunk in parsed_chunks {
+        data.extend_from_slice(&chunk);
     }
 
     *size = data.len() as u64;

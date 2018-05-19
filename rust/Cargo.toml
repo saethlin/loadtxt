@@ -5,12 +5,11 @@ authors = ["Ben Kimock <kimockb@gmail.com>"]
 build = "build.rs"
 
 [dependencies]
-rayon = "1.0"
 num_cpus = "1.8"
+scoped_threadpool = "0.1.9"
 
 [build-dependencies]
 cbindgen = "0.5.2"
 
 [lib]
 crate-type = ["cdylib"]
-
