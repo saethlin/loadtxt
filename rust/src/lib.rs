@@ -118,8 +118,6 @@ pub unsafe extern "C" fn loadtxt(
         *rows += chunk.rows as u64;
     }
 
-    //assert_eq!(data.len() as u64, *cols * *rows);
-
     let ptr = data.as_ptr();
     std::mem::forget(data);
     ptr
