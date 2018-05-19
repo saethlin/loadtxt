@@ -34,7 +34,11 @@ pub unsafe extern "C" fn loadtxt(
 
     let contents = fs::read_to_string(filename).unwrap();
     // handle skiprows
-    let remaining = contents.splitn(skiprows as usize + 1, '\n').last().unwrap().trim();
+    let remaining = contents
+        .splitn(skiprows as usize + 1, '\n')
+        .last()
+        .unwrap()
+        .trim();
 
     let first_line = remaining.lines().next().unwrap();
     let num_cols = first_line.split_whitespace().count();
@@ -68,7 +72,8 @@ pub unsafe extern "C" fn loadtxt(
                 let mut error_line = None;
                 let mut rows = 0;
                 let mut data = Vec::with_capacity((approx_rows * num_cols * 2) / ncpu);
-                slice.trim()
+                slice
+                    .trim()
                     .lines()
                     .filter(|l| !l.starts_with(comments))
                     .for_each(|l| {
@@ -77,15 +82,23 @@ pub unsafe extern "C" fn loadtxt(
                             these_cols += 1;
                             match s.parse() {
                                 Ok(v) => data.push(v),
-                                Err(_) => if error_line.is_none() {error_line = Some(rows)},
+                                Err(_) => if error_line.is_none() {
+                                    error_line = Some(rows)
+                                },
                             };
                         });
                         if these_cols != num_cols {
-                            if error_line.is_none() {error_line = Some(rows)}
+                            if error_line.is_none() {
+                                error_line = Some(rows)
+                            }
                         }
                         rows += 1;
                     });
-                *e = Chunk { data, rows, error_line }
+                *e = Chunk {
+                    data,
+                    rows,
+                    error_line,
+                }
             });
 
             slice_begin = slice_end;
@@ -147,7 +160,6 @@ pub unsafe extern "C" fn loadtxt_unchecked(filename: *const c_char, size: *mut u
             slice_begin = slice_end;
         }
     });
-
 
     let mut data = Vec::with_capacity(parsed_chunks.iter().map(|c| c.len()).sum::<usize>() + 1);
     for chunk in parsed_chunks {
