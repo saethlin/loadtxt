@@ -13,8 +13,7 @@ def build_native(spec):
             'loadtxt',
             in_path='target/release'),
         header_filename=lambda: build.find_header(
-            'loadtxt.h',
-            in_path='target'),
+            'loadtxt.h'),
         rtld_flags=[
             'NOW',
             'NODELETE'],

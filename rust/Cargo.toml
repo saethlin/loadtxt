@@ -2,14 +2,10 @@
 name = "loadtxt"
 version = "0.1.0"
 authors = ["Ben Kimock <kimockb@gmail.com>"]
-build = "build.rs"
 
 [dependencies]
 num_cpus = "1.8"
 scoped_threadpool = "0.1.9"
-
-[build-dependencies]
-cbindgen = "0.5.2"
 
 [lib]
 crate-type = ["cdylib"]
