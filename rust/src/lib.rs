@@ -1,6 +1,3 @@
-extern crate num_cpus;
-extern crate scoped_threadpool;
-
 use std::ffi::CStr;
 use std::fs;
 use std::os::raw::{c_char, c_int};
@@ -82,9 +79,11 @@ pub unsafe extern "C" fn loadtxt(
                             these_cols += 1;
                             match s.parse() {
                                 Ok(v) => data.push(v),
-                                Err(_) => if error_line.is_none() {
-                                    error_line = Some(rows)
-                                },
+                                Err(_) => {
+                                    if error_line.is_none() {
+                                        error_line = Some(rows)
+                                    }
+                                }
                             };
                         });
                         if these_cols != num_cols {
@@ -123,12 +122,20 @@ pub unsafe extern "C" fn loadtxt(
     ptr
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn loadtxt_unchecked(filename: *const c_char, size: *mut u64) -> *const i64 {
-    let filename = CStr::from_ptr(filename).to_str().unwrap();
-    let ncpu = num_cpus::get();
+pub fn unchecked_internal<T>(filename: &str) -> Option<Vec<T>>
+where
+    T: Clone + Send + lexical::FromBytes,
+{
+    let bytes = match fs::read(filename) {
+        Ok(v) => v,
+        Err(_) => return None,
+    };
 
-    let bytes = fs::read(filename).unwrap();
+    let ncpu = num_cpus::get();
+    if ncpu == 0 {
+        return None;
+    }
+
     let chunksize = bytes.len() / ncpu;
     let mut parsed_chunks = vec![Vec::new(); ncpu];
 
@@ -151,25 +158,74 @@ pub unsafe extern "C" fn loadtxt_unchecked(filename: *const c_char, size: *mut u
                 *e = slice
                     .split(|x| x.is_ascii_whitespace())
                     .filter(|s| s.len() > 0)
-                    .map(|s| parse_unchecked(s))
-                    .collect::<Vec<i64>>();
+                    .map(|s| lexical::parse(s))
+                    .collect::<Vec<T>>();
             });
 
             slice_begin = slice_end;
         }
     });
 
+    let start = std::time::Instant::now();
     let mut data = Vec::with_capacity(parsed_chunks.iter().map(|c| c.len()).sum::<usize>() + 1);
+    println!("{:?}", start.elapsed());
     for chunk in parsed_chunks {
         data.extend_from_slice(&chunk);
     }
+    println!("{:?}", start.elapsed());
 
-    *size = data.len() as u64;
-    let ptr = data.as_ptr();
-    std::mem::forget(data);
-    ptr
+    Some(data)
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn loadtxt_i64_unchecked(
+    filename: *const c_char,
+    size: *mut u64,
+) -> *const i64 {
+    let filename = match CStr::from_ptr(filename).to_str() {
+        Ok(v) => v,
+        Err(_) => return std::ptr::null(),
+    };
+
+    match unchecked_internal(filename) {
+        Some(output) => {
+            *size = output.len() as u64;
+            let ptr = output.as_ptr();
+            std::mem::forget(output);
+            ptr
+        }
+        None => {
+            *size = 0;
+            std::ptr::null()
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn loadtxt_f64_unchecked(
+    filename: *const c_char,
+    size: *mut u64,
+) -> *const f64 {
+    let filename = match CStr::from_ptr(filename).to_str() {
+        Ok(v) => v,
+        Err(_) => return std::ptr::null(),
+    };
+
+    match unchecked_internal(filename) {
+        Some(output) => {
+            *size = output.len() as u64;
+            let ptr = output.as_ptr();
+            std::mem::forget(output);
+            ptr
+        }
+        None => {
+            *size = 0;
+            std::ptr::null()
+        }
+    }
+}
+
+/*
 fn parse_unchecked(digits: &[u8]) -> i64 {
     let mut result = 0_i64;
     for &c in digits {
@@ -178,3 +234,4 @@ fn parse_unchecked(digits: &[u8]) -> i64 {
     }
     result
 }
+*/

@@ -24,11 +24,21 @@ def loadtxt(filename, comments='#', skiprows=0, transpose=False):
     return array
 
 
-def loadtxt_unchecked(filename):
+def loadtxt_unchecked(filename, dtype):
     size_ptr = ffi.new("uint64_t *")
 
-    data_ptr = lib.loadtxt_unchecked(filename.encode(), size_ptr)
-    size = size_ptr[0]
+    if dtype == int or dtype == np.int64:
+        dtype = np.int64
+        data_ptr = lib.loadtxt_i64_unchecked(filename.encode(), size_ptr)
 
+    elif dtype == float or dtype == np.float64:
+        dtype = np.float64
+        data_ptr = lib.loadtxt_f64_unchecked(filename.encode(), size_ptr)
+
+    if data_ptr == ffi.NULL:
+        raise RuntimeError("Unchecked parsing failed. Use loadtxt.loadtxt to get useful errors")
+
+    size = size_ptr[0]
     buf = ffi.buffer(data_ptr, 8 * size)
-    return np.frombuffer(buf, dtype=np.int64, count=size)
+
+    return np.frombuffer(buf, dtype=dtype, count=size)

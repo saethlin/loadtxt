@@ -2,10 +2,12 @@
 name = "loadtxt"
 version = "0.1.0"
 authors = ["Ben Kimock <kimockb@gmail.com>"]
+edition = "2018"
 
 [dependencies]
-num_cpus = "1.8"
+num_cpus = "1.9"
 scoped_threadpool = "0.1.9"
+lexical = "1.9"
 
 [lib]
 crate-type = ["cdylib"]
