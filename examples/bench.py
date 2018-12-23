@@ -2,8 +2,8 @@ import loadtxt
 import numpy as np
 import time
 
-data = np.random.rand(1_000_000, 10)
-np.savetxt('data.txt', data)
+#data = np.random.rand(10_000_000, 10)
+#np.savetxt('data.txt', data)
 
 start = time.time()
 from_loadtxt = loadtxt.loadtxt_unchecked('data.txt', float)

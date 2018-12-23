@@ -122,19 +122,19 @@ pub unsafe extern "C" fn loadtxt(
     ptr
 }
 
-pub fn unchecked_internal<T>(filename: &str) -> Option<Vec<T>>
+fn unchecked_internal<T>(filename: &str) -> Option<Vec<T>>
 where
     T: Clone + Send + lexical::FromBytes,
 {
+    let start = std::time::Instant::now();
     let bytes = match fs::read(filename) {
         Ok(v) => v,
         Err(_) => return None,
     };
+    println!("{:?}", start.elapsed());
 
+    let start = std::time::Instant::now();
     let ncpu = num_cpus::get();
-    if ncpu == 0 {
-        return None;
-    }
 
     let chunksize = bytes.len() / ncpu;
     let mut parsed_chunks = vec![Vec::new(); ncpu];
@@ -165,10 +165,10 @@ where
             slice_begin = slice_end;
         }
     });
+    println!("{:?}", start.elapsed());
 
     let start = std::time::Instant::now();
-    let mut data = Vec::with_capacity(parsed_chunks.iter().map(|c| c.len()).sum::<usize>() + 1);
-    println!("{:?}", start.elapsed());
+    let mut data = Vec::with_capacity(parsed_chunks.iter().map(|c| c.len()).sum::<usize>());
     for chunk in parsed_chunks {
         data.extend_from_slice(&chunk);
     }
