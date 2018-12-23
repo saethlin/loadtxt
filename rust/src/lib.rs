@@ -126,12 +126,8 @@ fn unchecked_internal<T>(filename: &str) -> Option<Vec<T>>
 where
     T: Clone + Send + lexical::FromBytes,
 {
-    let start = std::time::Instant::now();
-    let bytes = match fs::read(filename) {
-        Ok(v) => v,
-        Err(_) => return None,
-    };
-    println!("{:?}", start.elapsed());
+    let file = fs::File::open(filename).unwrap();
+    let bytes = unsafe { memmap::Mmap::map(&file).unwrap() };
 
     let start = std::time::Instant::now();
     let ncpu = num_cpus::get();
