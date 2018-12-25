@@ -1,5 +1,5 @@
 import loadtxt
-#import numpy as np
+import numpy as np
 import time
 
 #data = np.random.rand(10_000_000, 10)

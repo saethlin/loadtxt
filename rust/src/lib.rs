@@ -126,8 +126,8 @@ fn unchecked_internal<T>(filename: &str) -> Option<Vec<T>>
 where
     T: Clone + Send + lexical::FromBytes,
 {
-    let file = fs::File::open(filename).unwrap();
-    let bytes = unsafe { memmap::Mmap::map(&file).unwrap() };
+    let file = fs::File::open(filename).ok()?;
+    let bytes = unsafe { memmap::Mmap::map(&file).ok()? };
 
     let start = std::time::Instant::now();
     let ncpu = num_cpus::get();
@@ -173,6 +173,55 @@ where
     Some(data)
 }
 
+fn unchecked_internal_dragons<T>(filename: &str) -> Option<Vec<T>>
+where
+    T: Clone + Send + lexical::FromBytes + Sync,
+{
+    let ncpu = num_cpus::get();
+
+    let file = fs::File::open(filename).ok()?;
+    let input = unsafe { memmap::Mmap::map(&file).ok()? };
+
+    let line_length = input.iter().position(|b| *b == b'\n')? + 1;
+    let num_lines = input.len() / line_length;
+
+    let lines_per_cpu = num_lines / ncpu;
+    let bytes_per_cpu = lines_per_cpu * line_length;
+
+    let items_per_line = input[..line_length]
+        .split(|x| x.is_ascii_whitespace())
+        .filter(|s| s.len() > 0)
+        .count();
+    let items_per_cpu = (items_per_line * num_lines) / ncpu;
+
+    //let mut output = vec![T::default(); items_per_line * num_lines];
+    let mut output = Vec::with_capacity(items_per_line * num_lines);
+    unsafe { output.set_len(output.capacity()) }
+
+    scoped_threadpool::Pool::new(ncpu as u32).scoped(|scoped| {
+        for (input_slice, output_slice) in input
+            .chunks(bytes_per_cpu)
+            .zip(output.chunks_mut(items_per_cpu))
+        {
+            scoped.execute(move || {
+                let mut num = 0;
+                for (n, number) in input_slice
+                    .split(|x| x.is_ascii_whitespace())
+                    .filter(|s| s.len() > 0)
+                    .map(|s| lexical::parse(s))
+                    .enumerate()
+                {
+                    output_slice[n] = number;
+                    num += 1;
+                }
+                println!("{}", num);
+            });
+        }
+    });
+
+    Some(output)
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn loadtxt_i64_unchecked(
     filename: *const c_char,
@@ -183,7 +232,7 @@ pub unsafe extern "C" fn loadtxt_i64_unchecked(
         Err(_) => return std::ptr::null(),
     };
 
-    match unchecked_internal(filename) {
+    match unchecked_internal_dragons(filename) {
         Some(output) => {
             *size = output.len() as u64;
             let ptr = output.as_ptr();
@@ -207,7 +256,7 @@ pub unsafe extern "C" fn loadtxt_f64_unchecked(
         Err(_) => return std::ptr::null(),
     };
 
-    match unchecked_internal(filename) {
+    match unchecked_internal_dragons(filename) {
         Some(output) => {
             *size = output.len() as u64;
             let ptr = output.as_ptr();
