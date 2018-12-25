@@ -194,7 +194,6 @@ where
         .count();
     let items_per_cpu = (items_per_line * num_lines) / ncpu;
 
-    //let mut output = vec![T::default(); items_per_line * num_lines];
     let mut output = Vec::with_capacity(items_per_line * num_lines);
     unsafe { output.set_len(output.capacity()) }
 
@@ -214,7 +213,7 @@ where
                     output_slice[n] = number;
                     num += 1;
                 }
-                println!("{}", num);
+                assert_eq!(num, output_slice.len());
             });
         }
     });
