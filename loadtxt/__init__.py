@@ -2,13 +2,21 @@ import numpy as np
 from loadtxt._native import ffi, lib
 
 
-def loadtxt(filename, comments='#', skiprows=0, transpose=False):
+def loadtxt(filename, comments="#", skiprows=0, transpose=False):
     row_ptr = ffi.new("uint64_t *")
     col_ptr = ffi.new("uint64_t *")
     has_error = ffi.new("uint8_t *")
     error_line = ffi.new("uint64_t *")
 
-    data_ptr = lib.loadtxt(filename.encode(), comments.encode(), skiprows, row_ptr, col_ptr, has_error, error_line)
+    data_ptr = lib.loadtxt(
+        filename.encode(),
+        comments.encode(),
+        skiprows,
+        row_ptr,
+        col_ptr,
+        has_error,
+        error_line,
+    )
 
     if has_error[0]:
         raise ValueError("Parsing failed at line {}.".format(error_line[0]))
@@ -25,20 +33,33 @@ def loadtxt(filename, comments='#', skiprows=0, transpose=False):
 
 
 def loadtxt_unchecked(filename, dtype):
-    size_ptr = ffi.new("uint64_t *")
+    rows_ptr = ffi.new("uint64_t *")
+    cols_ptr = ffi.new("uint64_t *")
+    error_ptr = ffi.new("char **")
 
     if dtype == int or dtype == np.int64:
         dtype = np.int64
-        data_ptr = lib.loadtxt_i64_unchecked(filename.encode(), size_ptr)
+        data_ptr = lib.loadtxt_i64_unchecked(
+            filename.encode(), rows_ptr, cols_ptr, error_ptr
+        )
 
     elif dtype == float or dtype == np.float64:
         dtype = np.float64
-        data_ptr = lib.loadtxt_f64_unchecked(filename.encode(), size_ptr)
+        data_ptr = lib.loadtxt_f64_unchecked(
+            filename.encode(), rows_ptr, cols_ptr, error_ptr
+        )
+
+    else:
+        raise ValueError(f"Unsupported dtype {dtype}")
 
     if data_ptr == ffi.NULL:
-        raise RuntimeError("Unchecked parsing failed. Use loadtxt.loadtxt to get useful errors")
+        error = error_ptr[0].decode("utf-8")
+        raise RuntimeError(f"Parsing failed: {error}")
 
-    size = size_ptr[0]
-    buf = ffi.buffer(data_ptr, 8 * size)
+    rows = rows_ptr[0]
+    cols = cols_ptr[0]
+    buf = ffi.buffer(data_ptr, 8 * rows * cols)
 
-    return np.frombuffer(buf, dtype=dtype, count=size)
+    arr = np.frombuffer(buf, dtype=dtype, count=rows * cols)
+    arr.shape = (rows, cols)
+    return arr

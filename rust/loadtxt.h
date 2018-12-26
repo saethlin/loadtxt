@@ -10,6 +10,12 @@ const double *loadtxt(const char *filename,
                       uint8_t *has_error,
                       uint64_t *error_line);
 
-const double *loadtxt_f64_unchecked(const char *filename, uint64_t *size);
+const double *loadtxt_f64_unchecked(const char *filename,
+                                    uint64_t *rows,
+                                    uint64_t *columns,
+                                    const char **error);
 
-const int64_t *loadtxt_i64_unchecked(const char *filename, uint64_t *size);
+const int64_t *loadtxt_i64_unchecked(const char *filename,
+                                     uint64_t *rows,
+                                     uint64_t *columns,
+                                     const char **error);

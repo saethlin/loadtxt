@@ -1,4 +1,4 @@
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::fs;
 use std::os::raw::{c_char, c_int};
 
@@ -7,6 +7,19 @@ struct Chunk<T> {
     data: Vec<T>,
     rows: u64,
     error_line: Option<u64>,
+}
+
+struct RustArray<T> {
+    rows: u64,
+    columns: u64,
+    data: Vec<T>,
+}
+
+#[no_mangle]
+#[repr(C)]
+pub enum ParseType {
+    Int,
+    Float,
 }
 
 #[no_mangle]
@@ -122,67 +135,22 @@ pub unsafe extern "C" fn loadtxt(
     ptr
 }
 
-fn unchecked_internal<T>(filename: &str) -> Option<Vec<T>>
+use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
+fn unchecked_internal<T>(filename: &str) -> io::Result<RustArray<T>>
 where
-    T: Clone + Send + lexical::FromBytes,
-{
-    let file = fs::File::open(filename).ok()?;
-    let bytes = unsafe { memmap::Mmap::map(&file).ok()? };
-
-    let start = std::time::Instant::now();
-    let ncpu = num_cpus::get();
-
-    let chunksize = bytes.len() / ncpu;
-    let mut parsed_chunks = vec![Vec::new(); ncpu];
-
-    scoped_threadpool::Pool::new(ncpu as u32).scoped(|scoped| {
-        // Break up the bytes into roughly equal-size chunks, but make sure
-        // to only slice on whitespace characters
-        let mut slice_begin = 0;
-        for e in &mut parsed_chunks {
-            let mut slice_end = slice_begin + chunksize;
-            if slice_end > bytes.len() {
-                slice_end = bytes.len();
-            } else {
-                while !bytes[slice_end].is_ascii_whitespace() {
-                    slice_end += 1;
-                }
-            }
-
-            let slice = &bytes[slice_begin..slice_end];
-            scoped.execute(move || {
-                *e = slice
-                    .split(|x| x.is_ascii_whitespace())
-                    .filter(|s| s.len() > 0)
-                    .map(|s| lexical::parse(s))
-                    .collect::<Vec<T>>();
-            });
-
-            slice_begin = slice_end;
-        }
-    });
-    println!("{:?}", start.elapsed());
-
-    let start = std::time::Instant::now();
-    let mut data = Vec::with_capacity(parsed_chunks.iter().map(|c| c.len()).sum::<usize>());
-    for chunk in parsed_chunks {
-        data.extend_from_slice(&chunk);
-    }
-    println!("{:?}", start.elapsed());
-
-    Some(data)
-}
-
-fn unchecked_internal_dragons<T>(filename: &str) -> Option<Vec<T>>
-where
-    T: Clone + Send + lexical::FromBytes + Sync,
+    T: Clone + Send + lexical::FromBytes + Sync + Default,
 {
     let ncpu = num_cpus::get();
 
-    let file = fs::File::open(filename).ok()?;
-    let input = unsafe { memmap::Mmap::map(&file).ok()? };
+    let file = fs::File::open(filename)?;
+    let input = unsafe { memmap::Mmap::map(&file)? };
 
-    let line_length = input.iter().position(|b| *b == b'\n')? + 1;
+    let line_length = input
+        .iter()
+        .position(|b| *b == b'\n')
+        .ok_or(io::Error::new(io::ErrorKind::Other, "No newlines in file"))?
+        + 1;
     let num_lines = input.len() / line_length;
 
     let lines_per_cpu = num_lines / ncpu;
@@ -194,16 +162,17 @@ where
         .count();
     let items_per_cpu = (items_per_line * num_lines) / ncpu;
 
-    let mut output = Vec::with_capacity(items_per_line * num_lines);
-    unsafe { output.set_len(output.capacity()) }
+    let mut output = vec![T::default(); items_per_line * num_lines];
+    let error_flag = std::sync::Arc::new(AtomicBool::new(false));
 
     scoped_threadpool::Pool::new(ncpu as u32).scoped(|scoped| {
         for (input_slice, output_slice) in input
             .chunks(bytes_per_cpu)
             .zip(output.chunks_mut(items_per_cpu))
         {
+            let error_flag = error_flag.clone();
             scoped.execute(move || {
-                let mut num = 0;
+                let mut number_of_items_parsed = 0;
                 for (n, number) in input_slice
                     .split(|x| x.is_ascii_whitespace())
                     .filter(|s| s.len() > 0)
@@ -211,35 +180,60 @@ where
                     .enumerate()
                 {
                     output_slice[n] = number;
-                    num += 1;
+                    number_of_items_parsed += 1;
                 }
-                assert_eq!(num, output_slice.len());
+                if number_of_items_parsed != output_slice.len() {
+                    error_flag.store(true, Ordering::Relaxed);
+                }
             });
         }
     });
 
-    Some(output)
+    if error_flag.load(Ordering::Relaxed) {
+        Err(io::Error::new(io::ErrorKind::Other, "Error parsing file"))
+    } else {
+        Ok(RustArray {
+            rows: num_lines as u64,
+            columns: items_per_line as u64,
+            data: output,
+        })
+    }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn loadtxt_i64_unchecked(
     filename: *const c_char,
-    size: *mut u64,
+    rows: *mut u64,
+    columns: *mut u64,
+    error: *mut *const c_char,
 ) -> *const i64 {
     let filename = match CStr::from_ptr(filename).to_str() {
         Ok(v) => v,
-        Err(_) => return std::ptr::null(),
+        Err(_) => {
+            let error_message = CString::new("Filename must be valid UTF-8").unwrap();
+            *error = error_message.as_ptr() as *mut c_char;
+            std::mem::forget(error);
+            return std::ptr::null();
+        }
     };
 
-    match unchecked_internal_dragons(filename) {
-        Some(output) => {
-            *size = output.len() as u64;
-            let ptr = output.as_ptr();
+    match unchecked_internal(filename) {
+        Ok(output) => {
+            *error = std::ptr::null_mut();
+
+            *rows = output.rows;
+            *columns = output.columns;
+            let ptr = output.data.as_ptr();
             std::mem::forget(output);
             ptr
         }
-        None => {
-            *size = 0;
+        Err(e) => {
+            let error_message = CString::new(e.to_string()).unwrap();
+            *error = error_message.as_ptr() as *mut c_char;
+            std::mem::forget(error);
+
+            *rows = 0;
+            *columns = 0;
             std::ptr::null()
         }
     }
@@ -248,22 +242,37 @@ pub unsafe extern "C" fn loadtxt_i64_unchecked(
 #[no_mangle]
 pub unsafe extern "C" fn loadtxt_f64_unchecked(
     filename: *const c_char,
-    size: *mut u64,
+    rows: *mut u64,
+    columns: *mut u64,
+    error: *mut *const c_char,
 ) -> *const f64 {
     let filename = match CStr::from_ptr(filename).to_str() {
         Ok(v) => v,
-        Err(_) => return std::ptr::null(),
+        Err(_) => {
+            let error_message = CString::new("Filename must be valid UTF-8").unwrap();
+            *error = error_message.as_ptr() as *mut c_char;
+            std::mem::forget(error);
+            return std::ptr::null();
+        }
     };
 
-    match unchecked_internal_dragons(filename) {
-        Some(output) => {
-            *size = output.len() as u64;
-            let ptr = output.as_ptr();
+    match unchecked_internal(filename) {
+        Ok(output) => {
+            *error = std::ptr::null_mut();
+
+            *rows = output.rows;
+            *columns = output.columns;
+            let ptr = output.data.as_ptr();
             std::mem::forget(output);
             ptr
         }
-        None => {
-            *size = 0;
+        Err(e) => {
+            let error_message = CString::new(e.to_string()).unwrap();
+            *error = error_message.as_ptr() as *mut c_char;
+            std::mem::forget(error);
+
+            *rows = 0;
+            *columns = 0;
             std::ptr::null()
         }
     }
