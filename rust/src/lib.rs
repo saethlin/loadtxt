@@ -212,7 +212,7 @@ pub unsafe extern "C" fn loadtxt_i64_unchecked(
         Err(_) => {
             let error_message = CString::new("Filename must be valid UTF-8").unwrap();
             *error = error_message.as_ptr() as *mut c_char;
-            std::mem::forget(error);
+            std::mem::forget(error_message);
             return std::ptr::null();
         }
     };
@@ -230,7 +230,7 @@ pub unsafe extern "C" fn loadtxt_i64_unchecked(
         Err(e) => {
             let error_message = CString::new(e.to_string()).unwrap();
             *error = error_message.as_ptr() as *mut c_char;
-            std::mem::forget(error);
+            std::mem::forget(error_message);
 
             *rows = 0;
             *columns = 0;
@@ -251,7 +251,7 @@ pub unsafe extern "C" fn loadtxt_f64_unchecked(
         Err(_) => {
             let error_message = CString::new("Filename must be valid UTF-8").unwrap();
             *error = error_message.as_ptr() as *mut c_char;
-            std::mem::forget(error);
+            std::mem::forget(error_message);
             return std::ptr::null();
         }
     };

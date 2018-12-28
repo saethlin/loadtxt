@@ -53,7 +53,7 @@ def loadtxt_unchecked(filename, dtype):
         raise ValueError(f"Unsupported dtype {dtype}")
 
     if data_ptr == ffi.NULL:
-        error = error_ptr[0].decode("utf-8")
+        error = ffi.string(error_ptr[0]).decode("utf-8")
         raise RuntimeError(f"Parsing failed: {error}")
 
     rows = rows_ptr[0]
