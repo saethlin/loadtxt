@@ -16,13 +16,6 @@ struct RustArray<T> {
 }
 
 #[no_mangle]
-#[repr(C)]
-pub enum ParseType {
-    Int,
-    Float,
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn loadtxt(
     filename: *const c_char,
     comments: *const c_char,
@@ -160,6 +153,7 @@ where
         .split(|x| x.is_ascii_whitespace())
         .filter(|s| s.len() > 0)
         .count();
+
     let items_per_cpu = (items_per_line * num_lines) / ncpu;
 
     let mut output = vec![T::default(); items_per_line * num_lines];
@@ -179,7 +173,13 @@ where
                     .map(|s| lexical::parse(s))
                     .enumerate()
                 {
-                    output_slice[n] = number;
+                    match output_slice.get_mut(n) {
+                        Some(v) => *v = number,
+                        None => {
+                            error_flag.store(true, Ordering::Relaxed);
+                            break;
+                        }
+                    }
                     number_of_items_parsed += 1;
                 }
                 if number_of_items_parsed != output_slice.len() {
@@ -269,7 +269,7 @@ pub unsafe extern "C" fn loadtxt_f64_unchecked(
         Err(e) => {
             let error_message = CString::new(e.to_string()).unwrap();
             *error = error_message.as_ptr() as *mut c_char;
-            std::mem::forget(error);
+            std::mem::forget(error_message);
 
             *rows = 0;
             *columns = 0;
