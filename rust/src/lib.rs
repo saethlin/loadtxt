@@ -200,6 +200,18 @@ where
     }
 }
 
+// This code has been the source of stupid bugs.
+// Now the operation lives in one place, and need only be correct once.
+fn to_cstring_leak<T>(item: T) -> *const c_char
+where
+    T: ToString,
+{
+    let message = CString::new(item.to_string()).unwrap();
+    let ptr = message.as_ptr();
+    std::mem::forget(message);
+    ptr
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn loadtxt_i64_unchecked(
     filename: *const c_char,
@@ -210,9 +222,7 @@ pub unsafe extern "C" fn loadtxt_i64_unchecked(
     let filename = match CStr::from_ptr(filename).to_str() {
         Ok(v) => v,
         Err(_) => {
-            let error_message = CString::new("Filename must be valid UTF-8").unwrap();
-            *error = error_message.as_ptr() as *mut c_char;
-            std::mem::forget(error_message);
+            *error = to_cstring_leak("Filename must be valid UTF-8");
             return std::ptr::null();
         }
     };
@@ -228,10 +238,7 @@ pub unsafe extern "C" fn loadtxt_i64_unchecked(
             ptr
         }
         Err(e) => {
-            let error_message = CString::new(e.to_string()).unwrap();
-            *error = error_message.as_ptr() as *mut c_char;
-            std::mem::forget(error_message);
-
+            *error = to_cstring_leak(e);
             *rows = 0;
             *columns = 0;
             std::ptr::null()
@@ -250,7 +257,7 @@ pub unsafe extern "C" fn loadtxt_f64_unchecked(
         Ok(v) => v,
         Err(_) => {
             let error_message = CString::new("Filename must be valid UTF-8").unwrap();
-            *error = error_message.as_ptr() as *mut c_char;
+            *error = error_message.as_ptr();
             std::mem::forget(error_message);
             return std::ptr::null();
         }
@@ -267,10 +274,7 @@ pub unsafe extern "C" fn loadtxt_f64_unchecked(
             ptr
         }
         Err(e) => {
-            let error_message = CString::new(e.to_string()).unwrap();
-            *error = error_message.as_ptr() as *mut c_char;
-            std::mem::forget(error_message);
-
+            *error = to_cstring_leak(e);
             *rows = 0;
             *columns = 0;
             std::ptr::null()
