@@ -89,7 +89,10 @@ pub fn loadtxt_checked<T: lexical::FromBytes + Default + Copy + Send>(
                                 Ok(v) => data.push(v),
                                 Err(_) => {
                                     error_flag.store(true, Ordering::Relaxed);
-                                    *this_thread_chunk = Err(parse_error(s));
+                                    *this_thread_chunk = Err(format!(
+                                        "Could not parse \"{}\"",
+                                        String::from_utf8_lossy(s)
+                                    ));
                                 }
                             };
                         });
@@ -97,8 +100,13 @@ pub fn loadtxt_checked<T: lexical::FromBytes + Default + Copy + Send>(
                     // Check if we read the right number of elements in this line
                     if columns_this_row != first_row_columns {
                         error_flag.store(true, Ordering::Relaxed);
-                        *this_thread_chunk =
-                            Err(row_num_error(first_row_columns, columns_this_row, line));
+                        *this_thread_chunk = Err(format!(
+                            "Expected {} row(s) based on the first line, \
+                             but found {} when parsing \"{}\"",
+                            first_row_columns,
+                            columns_this_row,
+                            String::from_utf8_lossy(line)
+                        ));
                     }
                     rows += 1;
                 }
@@ -132,20 +140,4 @@ pub fn loadtxt_checked<T: lexical::FromBytes + Default + Copy + Send>(
         rows,
         columns: first_row_columns,
     })
-}
-
-#[inline(never)]
-fn parse_error(item: &[u8]) -> String {
-    format!("Could not parse \"{}\"", String::from_utf8_lossy(item))
-}
-
-#[inline(never)]
-fn row_num_error(first_row: usize, this_row: usize, line: &[u8]) -> String {
-    format!(
-        "Expected {} row(s) based on the first line, \
-         but found {} when parsing \"{}\"",
-        first_row,
-        this_row,
-        String::from_utf8_lossy(line)
-    )
 }
