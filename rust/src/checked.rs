@@ -11,11 +11,10 @@ pub fn loadtxt_checked<T: lexical::FromBytes + Default + Copy + Send>(
 
     let file = fs::File::open(filename)?;
     let contents = unsafe { memmap::Mmap::map(&file)? };
-    let contents = std::str::from_utf8(&contents)?;
 
     // handle skiprows
     let remaining = contents
-        .splitn(skiprows as usize + 1, '\n')
+        .splitn(skiprows as usize + 1, |byte| *byte == b'\n')
         .last()
         .ok_or(format!(
             "No lines left in file after skipping {} rows",
@@ -23,15 +22,18 @@ pub fn loadtxt_checked<T: lexical::FromBytes + Default + Copy + Send>(
         ))?;
 
     let first_line = remaining
-        .lines()
-        .skip_while(|line| line.starts_with(comments))
+        .split(|c| *c == b'\n')
+        .skip_while(|line| line.starts_with(comments.as_bytes()))
         .next()
         .ok_or(format!(
             "No lines left in file after skipping {} rows",
             skiprows
         ))?;
 
-    let first_row_columns = first_line.split_whitespace().count();
+    let first_row_columns = first_line
+        .split(|byte| byte.is_ascii_whitespace())
+        .filter(|chunk| !chunk.is_empty())
+        .count();
     let approx_rows = remaining.len() / first_line.len();
     let chunksize = remaining.len() / ncpu;
 
@@ -48,10 +50,7 @@ pub fn loadtxt_checked<T: lexical::FromBytes + Default + Copy + Send>(
             if slice_end > remaining.len() {
                 slice_end = remaining.len();
             } else {
-                // This slice_end += 1 makes sure slices end with a newline and do not begin with
-                // one
-                // This prevents us needing to trim the slices
-                while remaining.as_bytes()[slice_end] != b'\n'{
+                while remaining[slice_end] != b'\n' {
                     slice_end += 1;
                     if slice_end == remaining.len() - 1 {
                         break;
@@ -60,7 +59,12 @@ pub fn loadtxt_checked<T: lexical::FromBytes + Default + Copy + Send>(
                 slice_end += 1;
             }
 
-            let slice = &remaining[slice_begin..slice_end];
+            let mut slice = &remaining[slice_begin..slice_end];
+            // Slices will contain their trailing newline separator if one exists
+            // This produces an empty line when split on b'\n', so remove it
+            if let Some(&b'\n') = slice.last() {
+                slice = &slice[..slice.len() - 1];
+            }
             let error_flag = error_flag.clone();
             scoped.execute(move || {
                 // Cannot use enumerate on rows or these_cols because they must
@@ -68,13 +72,16 @@ pub fn loadtxt_checked<T: lexical::FromBytes + Default + Copy + Send>(
                 let mut rows = 0;
                 let mut data = Vec::with_capacity((approx_rows * first_row_columns * 2) / ncpu);
 
-                for line in slice.lines().filter(|l| !l.starts_with(comments)) {
+                for line in slice
+                    .split(|byte| *byte == b'\n')
+                    .filter(|l| !l.starts_with(comments.as_bytes()))
+                {
                     if error_flag.load(Ordering::Relaxed) {
                         break;
                     }
 
                     let mut columns_this_row = 0;
-                    line.split(|c: char| c.is_ascii_whitespace())
+                    line.split(|c| c.is_ascii_whitespace())
                         .filter(|s| !s.is_empty())
                         .for_each(|s| {
                             columns_this_row += 1;
@@ -82,7 +89,10 @@ pub fn loadtxt_checked<T: lexical::FromBytes + Default + Copy + Send>(
                                 Ok(v) => data.push(v),
                                 Err(_) => {
                                     error_flag.store(true, Ordering::Relaxed);
-                                    *this_thread_chunk = Err(format!("Could not parse \"{}\"", s));
+                                    *this_thread_chunk = Err(format!(
+                                        "Could not parse \"{}\"",
+                                        String::from_utf8_lossy(s)
+                                    ));
                                 }
                             };
                         });
@@ -93,7 +103,9 @@ pub fn loadtxt_checked<T: lexical::FromBytes + Default + Copy + Send>(
                         *this_thread_chunk = Err(format!(
                             "Expected {} row(s) based on the first line, \
                              but found {} when parsing \"{}\"",
-                            first_row_columns, columns_this_row, line
+                            first_row_columns,
+                            columns_this_row,
+                            String::from_utf8_lossy(line)
                         ));
                     }
                     rows += 1;
