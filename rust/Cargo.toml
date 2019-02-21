@@ -3,6 +3,7 @@ name = "loadtxt"
 version = "0.1.0"
 authors = ["Ben Kimock <kimockb@gmail.com>"]
 edition = "2018"
+build = "build.rs"
 
 [dependencies]
 num_cpus = "1.9"
