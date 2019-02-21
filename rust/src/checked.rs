@@ -14,9 +14,23 @@ pub fn loadtxt_checked(
     let contents = std::str::from_utf8(&contents)?;
 
     // handle skiprows
-    let remaining = contents.splitn(skiprows as usize + 1, '\n').last().unwrap();
+    let remaining = contents
+        .splitn(skiprows as usize + 1, '\n')
+        .last()
+        .ok_or(format!(
+            "No lines left in file after skipping {} rows",
+            skiprows
+        ))?;
 
-    let first_line = remaining.lines().next().unwrap();
+    // Trim leading whitespace- would probably be confusing if done before skiprows
+    // Might be confusing anyway
+    let remaining = remaining.trim_left();
+
+    let first_line = remaining.lines().next().ok_or(format!(
+        "No lines left in file after skipping {} rows",
+        skiprows
+    ))?;
+
     let first_row_columns = first_line.split_whitespace().count();
     let approx_rows = remaining.len() / first_line.len();
     let chunksize = remaining.len() / ncpu;

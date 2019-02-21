@@ -8,12 +8,7 @@ def loadtxt(filename, comments="#", skiprows=0, transpose=False):
     error_ptr = ffi.new("char **")
 
     data_ptr = lib.loadtxt(
-        filename.encode(),
-        comments.encode(),
-        skiprows,
-        row_ptr,
-        col_ptr,
-        error_ptr,
+        filename.encode(), comments.encode(), skiprows, row_ptr, col_ptr, error_ptr
     )
 
     if data_ptr == ffi.NULL:
@@ -25,7 +20,7 @@ def loadtxt(filename, comments="#", skiprows=0, transpose=False):
     buf = ffi.buffer(data_ptr, 8 * rows * columns)
     array = np.frombuffer(buf, dtype=np.float64, count=rows * columns)
     array.shape = (rows, columns)
-    
+
     array = array.copy()
     lib.free(data_ptr, rows * columns)
 
