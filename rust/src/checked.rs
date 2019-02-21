@@ -1,37 +1,35 @@
-use std::ffi::{CStr, CString};
-use std::fs;
-use std::os::raw::{c_char, c_int};
-use std::sync::atomic::{AtomicBool, Ordering};
 use crate::{Chunk, RustArray};
+use std::fs;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub fn loadtxt_checked(
-    filename: CStr,
-    comments: CStr,
-    skiprows: u64,
-) -> Result<RustArray<f64>, String> {
+    filename: &str,
+    comments: &str,
+    skiprows: i32, // TODO: shouldn't be signed
+) -> Result<RustArray<f64>, Box<dyn std::error::Error>> {
     let ncpu = num_cpus::get();
 
     let file = fs::File::open(filename)?;
     let contents = unsafe { memmap::Mmap::map(&file)? };
+    let contents = std::str::from_utf8(&contents)?;
 
     // handle skiprows
-    let remaining = contents
-        .splitn(skiprows as usize + 1, |b| *b == b'\n')
-        .last()
-        .unwrap();
+    let remaining = contents.splitn(skiprows as usize + 1, '\n').last().unwrap();
 
     let first_line = remaining.lines().next().unwrap();
-    let num_cols = first_line.split_whitespace().count();
+    let first_row_columns = first_line.split_whitespace().count();
     let approx_rows = remaining.len() / first_line.len();
     let chunksize = remaining.len() / ncpu;
 
+    // Flag accessible to all threads so they can abort parsing as soon as any
+    // thread fails to parse something
     let error_flag = std::sync::Arc::new(AtomicBool::new(false));
 
-    let mut parsed_chunks = vec![Chunk::default(); ncpu];
+    let mut chunks = vec![Ok(Chunk::default()); ncpu];
     // Divide into chunks for threads
     scoped_threadpool::Pool::new(ncpu as u32).scoped(|scoped| {
         let mut slice_begin = 0;
-        for e in &mut parsed_chunks {
+        for this_thread_chunk in &mut chunks {
             let mut slice_end = slice_begin + chunksize;
             if slice_end > remaining.len() {
                 slice_end = remaining.len();
@@ -51,39 +49,40 @@ pub fn loadtxt_checked(
             scoped.execute(move || {
                 // Cannot use enumerate on rows or these_cols because they must
                 // outlive their iterators
-                let mut error_line = None;
                 let mut rows = 0;
-                let mut data = Vec::with_capacity((approx_rows * num_cols * 2) / ncpu);
-                for l in slice.trim().lines().filter(|l| !l.starts_with(comments)) {
+                let mut data = Vec::with_capacity((approx_rows * first_row_columns * 2) / ncpu);
+
+                for line in slice.trim().lines().filter(|l| !l.starts_with(comments)) {
                     if error_flag.load(Ordering::Relaxed) {
                         break;
                     }
 
-                    let mut these_cols = 0;
-                    l.split_whitespace().for_each(|s| {
-                        these_cols += 1;
-                        match lexical::try_parse(s) {
-                            Ok(v) => data.push(v),
-                            Err(_) => {
-                                error_flag.store(true, Ordering::Relaxed);
-                                if error_line.is_none() {
-                                    error_line = Some(rows)
+                    let mut columns_this_row = 0;
+                    line.split(|c: char| c.is_ascii_whitespace())
+                        .filter(|s| !s.is_empty())
+                        .for_each(|s| {
+                            columns_this_row += 1;
+                            match lexical::try_parse(s) {
+                                Ok(v) => data.push(v),
+                                Err(err) => {
+                                    error_flag.store(true, Ordering::Relaxed);
+                                    *this_thread_chunk = Err(err.to_string());
                                 }
-                            }
-                        };
-                    });
-                    if these_cols != num_cols {
+                            };
+                        });
+                    if columns_this_row != first_row_columns {
                         error_flag.store(true, Ordering::Relaxed);
-                        if error_line.is_none() {
-                            error_line = Some(rows)
-                        }
+                        *this_thread_chunk = Err(format!(
+                            "Expected {} row(s) based on the first line, \
+                             but found {} when parsing \"{}\"",
+                            first_row_columns, columns_this_row, line
+                        ));
                     }
                     rows += 1;
                 }
-                *e = Chunk {
-                    data,
-                    rows,
-                    error_line,
+                if this_thread_chunk.is_ok() {
+                    // If we didn't set e to an error already
+                    *this_thread_chunk = Ok(Chunk { data, rows })
                 }
             });
 
@@ -91,20 +90,23 @@ pub fn loadtxt_checked(
         }
     });
 
+    // Early return if there was an error
+    let mut parsed_chunks = Vec::new();
+    for c in chunks {
+        parsed_chunks.push(c?);
+    }
+
     let mut data =
         Vec::with_capacity(parsed_chunks.iter().map(|c| c.data.len()).sum::<usize>() + 1);
     let mut rows = 0;
     for chunk in parsed_chunks {
         data.extend_from_slice(&chunk.data);
-        if let Some(line) = chunk.error_line {
-            return Err(format!("Parsing failed on line {}", line));
-        }
         rows += chunk.rows as u64;
     }
 
     Ok(RustArray {
         data,
         rows,
-        num_cols,
+        columns: first_row_columns as u64,
     })
 }

@@ -5,8 +5,7 @@ from loadtxt._native import ffi, lib
 def loadtxt(filename, comments="#", skiprows=0, transpose=False):
     row_ptr = ffi.new("uint64_t *")
     col_ptr = ffi.new("uint64_t *")
-    has_error = ffi.new("uint8_t *")
-    error_line = ffi.new("uint64_t *")
+    error_ptr = ffi.new("char **")
 
     data_ptr = lib.loadtxt(
         filename.encode(),
@@ -14,12 +13,11 @@ def loadtxt(filename, comments="#", skiprows=0, transpose=False):
         skiprows,
         row_ptr,
         col_ptr,
-        has_error,
-        error_line,
+        error_ptr,
     )
 
-    if has_error[0]:
-        raise ValueError("Parsing failed at line {}.".format(error_line[0]))
+    if data_ptr == ffi.NULL:
+        raise RuntimeError(ffi.string(error_ptr[0]).decode("utf-8"))
 
     rows = row_ptr[0]
     columns = col_ptr[0]
@@ -27,6 +25,10 @@ def loadtxt(filename, comments="#", skiprows=0, transpose=False):
     buf = ffi.buffer(data_ptr, 8 * rows * columns)
     array = np.frombuffer(buf, dtype=np.float64, count=rows * columns)
     array.shape = (rows, columns)
+    
+    array = array.copy()
+    lib.free(data_ptr, rows * columns)
+
     if transpose:
         array = np.transpose(array)
     return array

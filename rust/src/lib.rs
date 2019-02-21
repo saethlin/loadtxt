@@ -6,16 +6,25 @@ use std::sync::atomic::{AtomicBool, Ordering};
 mod checked;
 
 #[derive(Default, Clone)]
-struct Chunk<T> {
-    data: Vec<T>,
-    rows: u64,
-    error_line: Option<u64>,
+pub struct Chunk<T> {
+    pub data: Vec<T>,
+    pub rows: u64,
 }
 
-struct RustArray<T> {
-    rows: u64,
-    columns: u64,
-    data: Vec<T>,
+pub struct RustArray<T> {
+    pub rows: u64,
+    pub columns: u64,
+    pub data: Vec<T>,
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn free(ptr: *mut f64, len: usize) {
+    use std::{alloc, mem};
+    alloc::dealloc(
+        ptr as *mut u8,
+        alloc::Layout::from_size_align(len * mem::size_of::<f64>(), mem::align_of::<f64>())
+            .unwrap(),
+    );
 }
 
 #[no_mangle]
@@ -25,28 +34,27 @@ pub unsafe extern "C" fn loadtxt(
     skiprows: c_int,
     rows: *mut u64,
     cols: *mut u64,
-    error: *mut c_char,
+    error: *mut *const c_char,
 ) -> *const f64 {
     *rows = 0;
     *cols = 0;
     *error = std::ptr::null();
-    *error_line = 0;
 
     let filename = CStr::from_ptr(filename).to_str().unwrap();
     let comments = CStr::from_ptr(comments).to_str().unwrap();
 
-    let data = checked::loadtxt_checked(filename, comments, skiprows);
-    
-    match data {
-        Ok(d) => {
-            let ptr = data.as_ptr();
-            std::mem::forget(data);
+    match checked::loadtxt_checked(filename, comments, skiprows) {
+        Ok(arr) => {
+            *rows = arr.rows;
+            *cols = arr.columns;
+            let ptr = arr.data.as_ptr();
+            std::mem::forget(arr);
             ptr
         }
         Err(e) => {
-            let error_string = CString::from(e.to_string());
-            std::mem::forget(error_string);
+            let error_string = CString::new(e.to_string()).unwrap();
             *error = error_string.as_ptr();
+            std::mem::forget(error_string);
             std::ptr::null()
         }
     }
