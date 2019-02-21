@@ -2,11 +2,11 @@ use crate::{Chunk, RustArray};
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-pub fn loadtxt_checked(
+pub fn loadtxt_checked<T: lexical::FromBytes + Default + Copy + Send>(
     filename: &str,
     comments: &str,
-    skiprows: i32, // TODO: shouldn't be signed
-) -> Result<RustArray<f64>, Box<dyn std::error::Error>> {
+    skiprows: usize,
+) -> Result<RustArray<T>, Box<dyn std::error::Error>> {
     let ncpu = num_cpus::get();
 
     let file = fs::File::open(filename)?;
@@ -22,14 +22,14 @@ pub fn loadtxt_checked(
             skiprows
         ))?;
 
-    // Trim leading whitespace- would probably be confusing if done before skiprows
-    // Might be confusing anyway
-    let remaining = remaining.trim_left();
-
-    let first_line = remaining.lines().next().ok_or(format!(
-        "No lines left in file after skipping {} rows",
-        skiprows
-    ))?;
+    let first_line = remaining
+        .lines()
+        .skip_while(|line| line.starts_with(comments))
+        .next()
+        .ok_or(format!(
+            "No lines left in file after skipping {} rows",
+            skiprows
+        ))?;
 
     let first_row_columns = first_line.split_whitespace().count();
     let approx_rows = remaining.len() / first_line.len();
@@ -48,14 +48,16 @@ pub fn loadtxt_checked(
             if slice_end > remaining.len() {
                 slice_end = remaining.len();
             } else {
-                while !remaining.is_char_boundary(slice_end)
-                    || remaining.as_bytes()[slice_end] != b'\n'
-                {
+                // This slice_end += 1 makes sure slices end with a newline and do not begin with
+                // one
+                // This prevents us needing to trim the slices
+                while remaining.as_bytes()[slice_end] != b'\n'{
                     slice_end += 1;
-                    if slice_end == remaining.len() {
+                    if slice_end == remaining.len() - 1 {
                         break;
                     }
                 }
+                slice_end += 1;
             }
 
             let slice = &remaining[slice_begin..slice_end];
@@ -66,7 +68,7 @@ pub fn loadtxt_checked(
                 let mut rows = 0;
                 let mut data = Vec::with_capacity((approx_rows * first_row_columns * 2) / ncpu);
 
-                for line in slice.trim().lines().filter(|l| !l.starts_with(comments)) {
+                for line in slice.lines().filter(|l| !l.starts_with(comments)) {
                     if error_flag.load(Ordering::Relaxed) {
                         break;
                     }
@@ -78,12 +80,14 @@ pub fn loadtxt_checked(
                             columns_this_row += 1;
                             match lexical::try_parse(s) {
                                 Ok(v) => data.push(v),
-                                Err(err) => {
+                                Err(_) => {
                                     error_flag.store(true, Ordering::Relaxed);
-                                    *this_thread_chunk = Err(err.to_string());
+                                    *this_thread_chunk = Err(format!("Could not parse \"{}\"", s));
                                 }
                             };
                         });
+
+                    // Check if we read the right number of elements in this line
                     if columns_this_row != first_row_columns {
                         error_flag.store(true, Ordering::Relaxed);
                         *this_thread_chunk = Err(format!(
@@ -95,7 +99,8 @@ pub fn loadtxt_checked(
                     rows += 1;
                 }
                 if this_thread_chunk.is_ok() {
-                    // If we didn't set e to an error already
+                    // If we didn't encounter an error, store the result
+                    // Should this use an Option<Result<Chunk>>?
                     *this_thread_chunk = Ok(Chunk { data, rows })
                 }
             });
@@ -115,12 +120,12 @@ pub fn loadtxt_checked(
     let mut rows = 0;
     for chunk in parsed_chunks {
         data.extend_from_slice(&chunk.data);
-        rows += chunk.rows as u64;
+        rows += chunk.rows;
     }
 
     Ok(RustArray {
         data,
         rows,
-        columns: first_row_columns as u64,
+        columns: first_row_columns,
     })
 }

@@ -1,6 +1,6 @@
 use std::ffi::{CStr, CString};
 use std::fs;
-use std::os::raw::{c_char, c_int};
+use std::os::raw::c_char;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 mod checked;
@@ -8,12 +8,12 @@ mod checked;
 #[derive(Default, Clone)]
 pub struct Chunk<T> {
     pub data: Vec<T>,
-    pub rows: u64,
+    pub rows: usize,
 }
 
 pub struct RustArray<T> {
-    pub rows: u64,
-    pub columns: u64,
+    pub rows: usize,
+    pub columns: usize,
     pub data: Vec<T>,
 }
 
@@ -31,9 +31,9 @@ pub unsafe extern "C" fn free(ptr: *mut f64, len: usize) {
 pub unsafe extern "C" fn loadtxt(
     filename: *const c_char,
     comments: *const c_char,
-    skiprows: c_int,
-    rows: *mut u64,
-    cols: *mut u64,
+    skiprows: usize,
+    rows: *mut usize,
+    cols: *mut usize,
     error: *mut *const c_char,
 ) -> *const f64 {
     *rows = 0;
@@ -124,8 +124,8 @@ where
         Err(io::Error::new(io::ErrorKind::Other, "Error parsing file"))
     } else {
         Ok(RustArray {
-            rows: num_lines as u64,
-            columns: items_per_line as u64,
+            rows: num_lines,
+            columns: items_per_line,
             data: output,
         })
     }
@@ -146,8 +146,8 @@ where
 #[no_mangle]
 pub unsafe extern "C" fn loadtxt_i64_unchecked(
     filename: *const c_char,
-    rows: *mut u64,
-    columns: *mut u64,
+    rows: *mut usize,
+    columns: *mut usize,
     error: *mut *const c_char,
 ) -> *const i64 {
     let filename = match CStr::from_ptr(filename).to_str() {
@@ -180,8 +180,8 @@ pub unsafe extern "C" fn loadtxt_i64_unchecked(
 #[no_mangle]
 pub unsafe extern "C" fn loadtxt_f64_unchecked(
     filename: *const c_char,
-    rows: *mut u64,
-    columns: *mut u64,
+    rows: *mut usize,
+    columns: *mut usize,
     error: *mut *const c_char,
 ) -> *const f64 {
     let filename = match CStr::from_ptr(filename).to_str() {

@@ -2,9 +2,9 @@ import numpy as np
 from loadtxt._native import ffi, lib
 
 
-def loadtxt(filename, comments="#", skiprows=0, transpose=False):
-    row_ptr = ffi.new("uint64_t *")
-    col_ptr = ffi.new("uint64_t *")
+def loadtxt(filename, comments="#", skiprows=0):
+    row_ptr = ffi.new("uintptr_t *")
+    col_ptr = ffi.new("uintptr_t *")
     error_ptr = ffi.new("char **")
 
     data_ptr = lib.loadtxt(
@@ -24,14 +24,12 @@ def loadtxt(filename, comments="#", skiprows=0, transpose=False):
     array = array.copy()
     lib.free(data_ptr, rows * columns)
 
-    if transpose:
-        array = np.transpose(array)
     return array
 
 
 def loadtxt_unchecked(filename, dtype):
-    rows_ptr = ffi.new("uint64_t *")
-    cols_ptr = ffi.new("uint64_t *")
+    rows_ptr = ffi.new("uintptr_t *")
+    cols_ptr = ffi.new("uintptr_t *")
     error_ptr = ffi.new("char **")
 
     if dtype == int or dtype == np.int64:
@@ -50,8 +48,7 @@ def loadtxt_unchecked(filename, dtype):
         raise ValueError(f"Unsupported dtype {dtype}")
 
     if data_ptr == ffi.NULL:
-        error = ffi.string(error_ptr[0]).decode("utf-8")
-        raise RuntimeError(f"Parsing failed: {error}")
+        raise RuntimeError(error = ffi.string(error_ptr[0]).decode("utf-8"))
 
     rows = rows_ptr[0]
     cols = cols_ptr[0]
