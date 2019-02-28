@@ -1,6 +1,12 @@
-use crate::{Chunk, RustArray};
+use crate::RustArray;
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+#[derive(Default, Clone)]
+struct Chunk<T> {
+    data: Vec<T>,
+    rows: usize,
+}
 
 pub fn loadtxt_checked<T: lexical::FromBytes + Default + Copy + Send>(
     filename: &str,
@@ -94,12 +100,14 @@ pub fn loadtxt_checked<T: lexical::FromBytes + Default + Copy + Send>(
                                     "Could not parse \"{}\"",
                                     String::from_utf8_lossy(s)
                                 ));
+                                break;
                             }
                         };
                     }
 
                     // Check if we read the right number of elements in this line
-                    if columns_this_row != first_row_columns {
+                    // And if we didn't record an error while attempting to parse the line
+                    if (columns_this_row != first_row_columns) && this_thread_chunk.is_ok() {
                         error_flag.store(true, Ordering::Relaxed);
                         *this_thread_chunk = Err(format!(
                             "Expected {} row(s) based on the first line, \
@@ -142,3 +150,4 @@ pub fn loadtxt_checked<T: lexical::FromBytes + Default + Copy + Send>(
         columns: first_row_columns,
     })
 }
+
