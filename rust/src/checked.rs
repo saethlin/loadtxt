@@ -81,21 +81,22 @@ pub fn loadtxt_checked<T: lexical::FromBytes + Default + Copy + Send>(
                     }
 
                     let mut columns_this_row = 0;
-                    line.split(|c| c.is_ascii_whitespace())
-                        .filter(|s| !s.is_empty())
-                        .for_each(|s| {
-                            columns_this_row += 1;
-                            match lexical::try_parse(s) {
-                                Ok(v) => data.push(v),
-                                Err(_) => {
-                                    error_flag.store(true, Ordering::Relaxed);
-                                    *this_thread_chunk = Err(format!(
-                                        "Could not parse \"{}\"",
-                                        String::from_utf8_lossy(s)
-                                    ));
-                                }
-                            };
-                        });
+                    for s in line
+                        .split(|c| c.is_ascii_whitespace())
+                        .filter(|s| s.len() > 0)
+                    {
+                        columns_this_row += 1;
+                        match lexical::try_parse(s) {
+                            Ok(v) => data.push(v),
+                            Err(_) => {
+                                error_flag.store(true, Ordering::Relaxed);
+                                *this_thread_chunk = Err(format!(
+                                    "Could not parse \"{}\"",
+                                    String::from_utf8_lossy(s)
+                                ));
+                            }
+                        };
+                    }
 
                     // Check if we read the right number of elements in this line
                     if columns_this_row != first_row_columns {
