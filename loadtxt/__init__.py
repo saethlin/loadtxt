@@ -36,17 +36,22 @@ def loadtxt(filename, comments="#", skiprows=0, usecols=None):
     if data_ptr == ffi.NULL:
         raise RuntimeError(ffi.string(error_ptr[0]).decode("utf-8"))
 
-    rows = row_ptr[0]
-    cols = col_ptr[0]
+    try:
+        rows = row_ptr[0]
+        cols = col_ptr[0]
 
-    buf = ffi.buffer(data_ptr, 8 * rows * cols)
-    array = np.frombuffer(buf, dtype=np.float64, count=rows * cols)
-    array.shape = (rows, cols)
+        if rows * cols == 0:
+            warnings.warn('loadtxt: Empty input file: "{}"'.format(filename), stacklevel=2)
+            return np.array([[]], dtype=np.float64)
 
-    array = array.copy()
-    lib.loadtxt_free(data_ptr, rows * cols)
+        buf = ffi.buffer(data_ptr, 8 * rows * cols)
+        array = np.frombuffer(buf, dtype=np.float64, count=rows * cols)
+        array.shape = (rows, cols)
 
-    if rows * cols == 0:
-        warnings.warn('loadtxt: Empty input file: "{}"'.format(filename), stacklevel=2)
+        array = array.copy()
+
+    finally:
+        print('finally')
+        lib.loadtxt_free(data_ptr, rows * cols)
 
     return array
