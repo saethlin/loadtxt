@@ -51,7 +51,6 @@ def loadtxt(filename, comments="#", skiprows=0, usecols=None):
         array = array.copy()
 
     finally:
-        print('finally')
         lib.loadtxt_free(data_ptr, rows * cols)
 
     return array
