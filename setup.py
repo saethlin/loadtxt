@@ -2,7 +2,7 @@ from setuptools import setup
 
 
 def build_native(spec):
-    build = spec.add_external_build(cmd=["cargo", "build", "--release"], path="./rust")
+    build = spec.add_external_build(cmd=["cargo", "build", "--release"], path=".")
 
     spec.add_cffi_module(
         module_path="loadtxt._native",

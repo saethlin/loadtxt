@@ -9,7 +9,7 @@ struct Chunk<T> {
     rows: usize,
 }
 
-pub fn loadtxt_checked<T: lexical::FromBytes + Default + Copy + Send>(
+pub fn loadtxt_checked<T: lexical::FromLexical + Default + Copy + Send>(
     filename: &str,
     comments: &str,
     skiprows: usize,
@@ -133,7 +133,7 @@ fn parse_chunk<T>(
     parsed: &mut Vec<T>,
 ) -> Result<usize, String>
 where
-    T: lexical::FromBytes,
+    T: lexical::FromLexical,
 {
     let mut rows = 0;
     for line in chunk
@@ -166,7 +166,7 @@ fn parse_chunk_usecols<T>(
     parsed: &mut Vec<T>,
 ) -> Result<usize, String>
 where
-    T: lexical::FromBytes,
+    T: lexical::FromLexical,
 {
     let mut rows = 0;
     for line in chunk
@@ -196,12 +196,12 @@ where
 // But break on the first error
 fn parse_line<T>(line: &[u8], parsed: &mut Vec<T>) -> Result<usize, String>
 where
-    T: lexical::FromBytes,
+    T: lexical::FromLexical,
 {
     line.split(|c| c.is_ascii_whitespace())
         .filter(|s| s.len() > 0)
         .try_fold(0, |count_parsed, word| {
-            lexical::try_parse(word)
+            lexical::parse(word)
                 .map(|item| {
                     parsed.push(item);
                     count_parsed + 1
@@ -212,7 +212,7 @@ where
 
 fn parse_line_usecols<T>(line: &[u8], usecols: &[u64], parsed: &mut Vec<T>) -> Result<usize, String>
 where
-    T: lexical::FromBytes,
+    T: lexical::FromLexical,
 {
     let mut next_usecol_index = 0;
     let mut columns = 0;
@@ -222,7 +222,7 @@ where
         .enumerate()
     {
         if usecols[next_usecol_index] as usize == w {
-            let item = lexical::try_parse(word)
+            let item = lexical::parse(word)
                 .map_err(|_| format!("Could not parse \"{}\"", String::from_utf8_lossy(word)))?;
             parsed.push(item);
             columns += 1;
