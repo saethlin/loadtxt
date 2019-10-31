@@ -7,6 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Build
+      - uses: actions/checkout@v1
         run: docker run --mount "type=bind,src=$PWD,dst=/wheelhouse" saethlin/forge:latest sh -c "$(cat release.sh)"
       - name: Check
         run: ls
