@@ -1,0 +1,12 @@
+name: CI/CD
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - name: Build
+        run: docker run forge:latest sh -c "$(cat release.sh)"
+        run: ls
