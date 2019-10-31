@@ -9,4 +9,5 @@ jobs:
       - uses: actions/checkout@v1
       - name: Build
         run: docker run forge:latest sh -c "$(cat release.sh)"
+      - name: Check
         run: ls
