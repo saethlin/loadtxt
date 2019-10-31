@@ -8,6 +8,6 @@ jobs:
     steps:
       - uses: actions/checkout@v1
       - name: Build
-        run: docker run saethlin/forge:latest sh -c "$(cat release.sh)"
+        run: docker run --mount "type=bind,src=$PWD,dst=/wheelhouse" saethlin/forge:latest sh -c "$(cat release.sh)"
       - name: Check
         run: ls
