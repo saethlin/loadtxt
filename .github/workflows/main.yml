@@ -6,8 +6,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Build
       - uses: actions/checkout@v1
-        run: docker run --mount "type=bind,src=$PWD,dst=/wheelhouse" saethlin/forge:latest sh -c "$(cat release.sh)"
+      - name: Build
+        env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: docker run -e "GITHUB_TOKEN=${GITHUB_TOKEN}" saethlin/forge:latest sh -c "$(cat release.sh)"
       - name: Check
         run: ls
