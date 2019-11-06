@@ -7,9 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v1
-      - name: Build
+      - name: wheel
         env:
             GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: docker run -e "GITHUB_TOKEN=${GITHUB_TOKEN}" saethlin/forge:latest sh -c "$(cat release.sh)"
-      - name: Check
-        run: ls

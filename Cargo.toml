@@ -13,3 +13,6 @@ memmap = "0.7"
 
 [lib]
 crate-type = ["cdylib"]
+
+[profile.release]
+debug = 1
