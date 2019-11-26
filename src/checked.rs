@@ -3,13 +3,15 @@ use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use lexical_core::FromLexical;
+
 #[derive(Default, Clone)]
 struct Chunk<T> {
     data: Vec<T>,
     rows: usize,
 }
 
-pub fn loadtxt_checked<T: lexical::FromLexical + Default + Copy + Send>(
+pub fn loadtxt_checked<T: FromLexical + Default + Copy + Send>(
     filename: &str,
     comments: &str,
     skiprows: usize,
@@ -68,18 +70,6 @@ pub fn loadtxt_checked<T: lexical::FromLexical + Default + Copy + Send>(
 
             let mut slice = &remaining[slice_begin..slice_end];
 
-            /*
-            if !slice.is_empty() {
-                println!(
-                    "{:?} {:?}, {} {}",
-                    slice[0] as char,
-                    slice[slice.len() - 1] as char,
-                    slice_begin,
-                    slice_end,
-                );
-            }
-            */
-
             if slice.last() == Some(&b'\n') {
                 slice = &slice[..slice.len() - 1];
             }
@@ -133,7 +123,7 @@ fn parse_chunk<T>(
     parsed: &mut Vec<T>,
 ) -> Result<usize, String>
 where
-    T: lexical::FromLexical,
+    T: FromLexical,
 {
     let mut rows = 0;
     for line in chunk
@@ -166,7 +156,7 @@ fn parse_chunk_usecols<T>(
     parsed: &mut Vec<T>,
 ) -> Result<usize, String>
 where
-    T: lexical::FromLexical,
+    T: FromLexical,
 {
     let mut rows = 0;
     for line in chunk
@@ -196,12 +186,12 @@ where
 // But break on the first error
 fn parse_line<T>(line: &[u8], parsed: &mut Vec<T>) -> Result<usize, String>
 where
-    T: lexical::FromLexical,
+    T: FromLexical,
 {
     line.split(|c| c.is_ascii_whitespace())
         .filter(|s| s.len() > 0)
         .try_fold(0, |count_parsed, word| {
-            lexical::parse(word)
+            lexical_core::parse(word)
                 .map(|item| {
                     parsed.push(item);
                     count_parsed + 1
@@ -212,7 +202,7 @@ where
 
 fn parse_line_usecols<T>(line: &[u8], usecols: &[u64], parsed: &mut Vec<T>) -> Result<usize, String>
 where
-    T: lexical::FromLexical,
+    T: FromLexical,
 {
     let mut next_usecol_index = 0;
     let mut columns = 0;
@@ -222,7 +212,7 @@ where
         .enumerate()
     {
         if usecols[next_usecol_index] as usize == w {
-            let item = lexical::parse(word)
+            let item = lexical_core::parse(word)
                 .map_err(|_| format!("Could not parse \"{}\"", String::from_utf8_lossy(word)))?;
             parsed.push(item);
             columns += 1;

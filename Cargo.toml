@@ -6,9 +6,9 @@ edition = "2018"
 build = "build.rs"
 
 [dependencies]
-num_cpus = "1.10"
+num_cpus = "1.0"
 scoped_threadpool = "0.1.9"
-lexical = "4.0"
+lexical-core = {version = "0.6", default-features = false, features = ["table"]}
 memmap = "0.7"
 
 [lib]
