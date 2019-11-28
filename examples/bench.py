@@ -1,6 +1,6 @@
 import loadtxt
 import numpy as np
-import time
+import timeit
 import os
 
 if not os.path.exists('data.txt'):
@@ -10,14 +10,11 @@ if not os.path.exists('data.txt'):
     np.savetxt('data.txt', data)
 
 n = 100
-start = time.time()
-for _ in range(n):
-     loadtxt.loadtxt('data.txt')
-print('checked', (time.time()-start) / n)
 
-start = time.time()
-np_ver = np.loadtxt('data.txt')
-print('numpy', (time.time()-start))
+ldt = timeit.repeat("loadtxt.loadtxt('data.txt')", repeat=100, number=1, globals=globals())
+print('loadtxt: {:.3f}'.format(np.min(ldt)))
 
-print(np.finfo(np_ver.dtype).eps)
-print(np.max(np.abs(np_ver - loadtxt_ver)/np_ver))
+npy = timeit.repeat("np.loadtxt('data.txt')", repeat=10, number=1, globals=globals())
+print('numpy: {:.3f}'.format(np.min(npy)))
+
+print('ratio: {:.1f}'.format(np.min(npy) / np.min(ldt)))

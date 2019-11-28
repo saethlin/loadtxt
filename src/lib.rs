@@ -2,6 +2,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 
 mod checked;
+mod simd;
 pub use checked::loadtxt_checked;
 
 #[derive(Default)]

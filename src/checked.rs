@@ -45,7 +45,7 @@ pub fn loadtxt_checked<T: FromLexical + Default + Copy + Send>(
 
     let columns = usecols.map(|u| u.len()).unwrap_or_else(|| {
         first_line
-            .split(|byte| byte.is_ascii_whitespace())
+            .split(|&byte| byte.is_ascii_whitespace())
             .filter(|chunk| !chunk.is_empty())
             .count()
     });
@@ -127,7 +127,7 @@ where
 {
     let mut rows = 0;
     for line in chunk
-        .split(|byte| *byte == b'\n')
+        .split(|&byte| byte == b'\n')
         .filter(|l| !l.starts_with(comments.as_bytes()))
     {
         if error_flag.load(Ordering::Relaxed) {
@@ -160,7 +160,7 @@ where
 {
     let mut rows = 0;
     for line in chunk
-        .split(|byte| *byte == b'\n')
+        .split(|&byte| byte == b'\n')
         .filter(|l| !l.starts_with(comments.as_bytes()))
     {
         if error_flag.load(Ordering::Relaxed) {
