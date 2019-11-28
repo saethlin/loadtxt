@@ -1,4 +1,3 @@
-use crate::RustArray;
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -6,9 +5,9 @@ use std::sync::Arc;
 use lexical_core::FromLexical;
 
 #[derive(Default, Clone)]
-struct Chunk<T> {
-    data: Vec<T>,
-    rows: usize,
+pub struct Chunk<T> {
+    pub data: Vec<T>,
+    pub rows: usize,
 }
 
 pub fn loadtxt_checked<T: FromLexical + Default + Copy + Send>(
@@ -16,12 +15,12 @@ pub fn loadtxt_checked<T: FromLexical + Default + Copy + Send>(
     comments: &str,
     skiprows: usize,
     usecols: Option<&[u64]>,
-) -> Result<RustArray<T>, Box<dyn std::error::Error>> {
+) -> Result<Vec<Chunk<T>>, Box<dyn std::error::Error>> {
     let ncpu = num_cpus::get();
 
     let file = fs::File::open(filename)?;
     if file.metadata()?.len() == 0 {
-        return Ok(RustArray::default());
+        return Ok(Vec::new());
     }
     let contents = unsafe { memmap::Mmap::map(&file)? };
 
@@ -31,7 +30,7 @@ pub fn loadtxt_checked<T: FromLexical + Default + Copy + Send>(
         .last()
         .unwrap_or(&[]);
     if remaining.is_empty() {
-        return Ok(RustArray::default());
+        return Ok(Vec::new());
     }
 
     let first_line = remaining
@@ -56,9 +55,10 @@ pub fn loadtxt_checked<T: FromLexical + Default + Copy + Send>(
     // thread fails to parse something
     let error_flag = Arc::new(AtomicBool::new(false));
 
-    let mut chunks = vec![Ok(Chunk::default()); ncpu];
+    let mut chunks: Vec<Result<Chunk<T>, _>> = vec![Ok(Chunk::default()); ncpu];
     // Divide into chunks for threads
-    scoped_threadpool::Pool::new(ncpu as u32).scoped(|scoped| {
+    let mut pool = scoped_threadpool::Pool::new(ncpu as u32);
+    pool.scoped(|scoped| {
         let mut slice_begin = 0;
         for this_thread_chunk in &mut chunks {
             let end_guess = usize::min(remaining.len(), slice_begin + chunksize);
@@ -98,21 +98,10 @@ pub fn loadtxt_checked<T: FromLexical + Default + Copy + Send>(
         }
     });
 
-    // ? to early return if there was an error in parsing
-    let chunks = chunks.into_iter().collect::<Result<Vec<_>, _>>()?;
-
-    let mut data = Vec::with_capacity(chunks.iter().map(|c| c.data.len()).sum());
-    let mut rows = 0;
-    for chunk in chunks {
-        data.extend_from_slice(&chunk.data);
-        rows += chunk.rows;
-    }
-
-    Ok(RustArray {
-        data,
-        rows,
-        columns,
-    })
+    chunks
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|s| s.into())
 }
 
 fn parse_chunk<T>(

@@ -3,9 +3,6 @@ import numpy as np
 
 assert np.all(loadtxt.loadtxt('test.txt') == np.loadtxt("test.txt"))
 
-assert np.all(loadtxt.loadtxt_unchecked("test.txt") ==
-              np.loadtxt("test.txt").flatten())
-
 assert np.all(
     loadtxt.loadtxt(
         'test.txt',

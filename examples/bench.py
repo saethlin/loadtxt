@@ -9,7 +9,9 @@ if not os.path.exists('data.txt'):
     data.shape = -1, 10
     np.savetxt('data.txt', data)
 
-n = 100
+
+#assert np.all(np.loadtxt('data.txt') == loadtxt.loadtxt('data.txt'))
+assert np.allclose(np.loadtxt('data.txt'), loadtxt.loadtxt('data.txt'))
 
 ldt = timeit.repeat("loadtxt.loadtxt('data.txt')", repeat=100, number=1, globals=globals())
 print('loadtxt: {:.3f}'.format(np.min(ldt)))

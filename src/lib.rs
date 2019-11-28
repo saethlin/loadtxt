@@ -1,31 +1,36 @@
 use std::ffi::{CStr, CString};
-use std::os::raw::c_char;
+use std::os::raw::{c_char, c_void};
 
 mod checked;
 mod simd;
-pub use checked::loadtxt_checked;
-
-#[derive(Default)]
-pub struct RustArray<T> {
-    pub rows: usize,
-    pub columns: usize,
-    pub data: Vec<T>,
-}
+use checked::loadtxt_checked;
+use checked::Chunk;
 
 #[no_mangle]
-pub unsafe extern "C" fn loadtxt_free(ptr: *mut f64, len: usize) {
-    use std::{alloc, mem};
-    if len > 0 {
-        alloc::dealloc(
-            ptr as *mut u8,
-            alloc::Layout::from_size_align(len * mem::size_of::<f64>(), mem::align_of::<f64>())
-                .unwrap(),
-        );
+pub unsafe extern "C" fn loadtxt_flatten_chunks(chunks: *mut c_void, output: *mut f64) {
+    let chunks: Box<Vec<Chunk<f64>>> = Box::from_raw(chunks as *mut Vec<Chunk<f64>>);
+    let mut start = 0isize;
+    for chunk in chunks.iter() {
+        std::ptr::copy_nonoverlapping(chunk.data.as_ptr(), output.offset(start), chunk.data.len());
+        start += chunk.data.len() as isize;
     }
+    /*
+    let mut data = vec![0.0f64; chunks.iter().map(|c| c.data.len()).sum()];
+    let mut remaining = &mut data[..];
+    pool.scoped(|scope| {
+        for chunk in &chunks {
+            let (left, right) = remaining.split_at_mut(chunk.data.len());
+            scope.execute(move || {
+                left.copy_from_slice(&chunk.data);
+            });
+            remaining = right;
+        }
+    });
+    */
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn loadtxt(
+pub unsafe extern "C" fn loadtxt_get_chunks(
     filename: *const c_char,
     comments: *const c_char,
     skiprows: usize,
@@ -34,7 +39,7 @@ pub unsafe extern "C" fn loadtxt(
     rows: *mut usize,
     cols: *mut usize,
     error: *mut *const c_char,
-) -> *const f64 {
+) -> *const c_void {
     *rows = 0;
     *cols = 0;
     *error = std::ptr::null();
@@ -49,12 +54,10 @@ pub unsafe extern "C" fn loadtxt(
     };
 
     match loadtxt_checked(filename, comments, skiprows, usecols) {
-        Ok(arr) => {
-            *rows = arr.rows;
-            *cols = arr.columns;
-            let ptr = arr.data.as_ptr();
-            std::mem::forget(arr);
-            ptr
+        Ok(chunks) => {
+            *rows = chunks.iter().map(|c| c.rows).sum();
+            *cols = chunks.iter().map(|c| c.data.len()).sum::<usize>() / *rows;
+            Box::leak(Box::new(chunks)) as *const Vec<crate::checked::Chunk<f64>> as *const c_void
         }
         Err(e) => {
             let error_string = CString::new(e.to_string()).unwrap();
