@@ -1,4 +1,4 @@
-use std::fs;
+use std::fs::File;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -15,22 +15,88 @@ pub fn loadtxt_checked<T: FromLexical + Default + Copy + Send>(
     comments: &str,
     skiprows: usize,
     usecols: Option<&[u64]>,
+    max_rows: Option<u64>,
 ) -> Result<Vec<Chunk<T>>, Box<dyn std::error::Error>> {
     let ncpu = num_cpus::get();
 
-    let file = fs::File::open(filename)?;
+    let file = File::open(filename)?;
+    // Cannot mmap empty files
     if file.metadata()?.len() == 0 {
         return Ok(Vec::new());
     }
     let contents = unsafe { memmap::Mmap::map(&file)? };
 
     // handle skiprows
-    let remaining = contents
+    let mut remaining = contents
         .splitn(skiprows as usize + 1, |byte| *byte == b'\n')
         .last()
         .unwrap_or(&[]);
+
     if remaining.is_empty() {
         return Ok(Vec::new());
+    }
+
+    // handle max_rows
+    if let Some(0) = max_rows {
+        // early exit to prevent underflow
+        return Ok(Vec::new());
+    }
+
+    if let Some(row_limit) = max_rows {
+        let mut rows_so_far = 0;
+        let mut simd_cursor = 0;
+        let mut ignore_next = false;
+        'outer: while simd_cursor < remaining.len().saturating_sub(16) {
+            unsafe {
+                use core::arch::x86_64::*;
+                let reg = _mm_loadu_si128(remaining[simd_cursor..].as_ptr() as *const __m128i);
+                let mut mask = _mm_movemask_epi8(_mm_cmpeq_epi8(reg, _mm_set1_epi8(b'\n' as i8)));
+                while mask != 0 {
+                    let mask_index = _mm_tzcnt_32(mask as u32) as usize;
+                    if !ignore_next {
+                        rows_so_far += 1;
+                        ignore_next = false;
+                        if rows_so_far == row_limit {
+                            remaining = &remaining[..simd_cursor + mask_index];
+                            break 'outer;
+                        }
+                    }
+                    if remaining
+                        .get(simd_cursor + mask_index + 1..)
+                        .map(|s| s.starts_with(comments.as_bytes()))
+                        .unwrap_or(false)
+                    {
+                        ignore_next = true;
+                    }
+                    mask ^= 1 << mask_index;
+                }
+            }
+            simd_cursor += 16;
+        }
+        if rows_so_far != row_limit {
+            for newline_index in remaining
+                .iter()
+                .enumerate()
+                .skip(simd_cursor)
+                .filter_map(|(index, it)| if *it == b'\n' { Some(index) } else { None })
+            {
+                if !ignore_next {
+                    rows_so_far += 1;
+                    if rows_so_far == row_limit {
+                        remaining = &remaining[..newline_index];
+                        break;
+                    }
+                }
+                ignore_next = false;
+                if remaining
+                    .get(newline_index + 1..)
+                    .map(|s| s.starts_with(comments.as_bytes()))
+                    .unwrap_or(false)
+                {
+                    ignore_next = true;
+                }
+            }
+        }
     }
 
     let first_line = remaining
@@ -44,7 +110,7 @@ pub fn loadtxt_checked<T: FromLexical + Default + Copy + Send>(
 
     let columns = usecols.map(|u| u.len()).unwrap_or_else(|| {
         first_line
-            .split(|&byte| byte.is_ascii_whitespace())
+            .split(u8::is_ascii_whitespace)
             .filter(|chunk| !chunk.is_empty())
             .count()
     });
@@ -116,7 +182,7 @@ where
 {
     let mut rows = 0;
     for line in chunk
-        .split(|&byte| byte == b'\n')
+        .split(|&b| b == b'\n')
         .filter(|l| !l.starts_with(comments.as_bytes()))
     {
         if error_flag.load(Ordering::Relaxed) {
@@ -124,13 +190,22 @@ where
         }
         let columns_this_row = parse_line(line, parsed)?;
         if columns_this_row != required_columns {
-            return Err(format!(
-                "Expected {} row(s), \
-                 but found {} when parsing \"{}\"",
-                required_columns,
-                columns_this_row,
-                String::from_utf8_lossy(line)
-            ));
+            if required_columns == 1 {
+                return Err(format!(
+                    "Expected 1 row, \
+                     but found {} when parsing \"{}\"",
+                    columns_this_row,
+                    String::from_utf8_lossy(line)
+                ));
+            } else {
+                return Err(format!(
+                    "Expected {} rows, \
+                     but found {} when parsing \"{}\"",
+                    required_columns,
+                    columns_this_row,
+                    String::from_utf8_lossy(line)
+                ));
+            }
         }
         rows += 1;
     }
@@ -158,13 +233,22 @@ where
 
         let columns_this_row = parse_line_usecols(line, usecols, parsed)?;
         if columns_this_row != usecols.len() {
-            return Err(format!(
-                "Expected {} row(s), \
-                 but found {} when parsing \"{}\"",
-                usecols.len(),
-                columns_this_row,
-                String::from_utf8_lossy(line)
-            ));
+            if usecols.len() == 1 {
+                return Err(format!(
+                    "Expected 1 row, \
+                     but found {} when parsing \"{}\"",
+                    columns_this_row,
+                    String::from_utf8_lossy(line)
+                ));
+            } else {
+                return Err(format!(
+                    "Expected {} rows, \
+                     but found {} when parsing \"{}\"",
+                    usecols.len(),
+                    columns_this_row,
+                    String::from_utf8_lossy(line)
+                ));
+            }
         }
         rows += 1;
     }
@@ -177,15 +261,20 @@ fn parse_line<T>(line: &[u8], parsed: &mut Vec<T>) -> Result<usize, String>
 where
     T: FromLexical,
 {
-    line.split(|c| c.is_ascii_whitespace())
-        .filter(|s| s.len() > 0)
+    line.split(u8::is_ascii_whitespace)
+        .filter(|s| !s.is_empty())
         .try_fold(0, |count_parsed, word| {
             lexical_core::parse(word)
                 .map(|item| {
                     parsed.push(item);
                     count_parsed + 1
                 })
-                .map_err(|_| format!("Could not parse \"{}\"", String::from_utf8_lossy(word)))
+                .map_err(|_| {
+                    format!(
+                        "Could not convert string to float: \"{}\"",
+                        String::from_utf8_lossy(word)
+                    )
+                })
         })
 }
 
@@ -196,13 +285,17 @@ where
     let mut next_usecol_index = 0;
     let mut columns = 0;
     for (w, word) in line
-        .split(|c| c.is_ascii_whitespace())
-        .filter(|s| s.len() > 0)
+        .split(u8::is_ascii_whitespace)
+        .filter(|s| !s.is_empty())
         .enumerate()
     {
         if usecols[next_usecol_index] as usize == w {
-            let item = lexical_core::parse(word)
-                .map_err(|_| format!("Could not parse \"{}\"", String::from_utf8_lossy(word)))?;
+            let item = lexical_core::parse(word).map_err(|_| {
+                format!(
+                    "Could not convert string to float: \"{}\"",
+                    String::from_utf8_lossy(word)
+                )
+            })?;
             parsed.push(item);
             columns += 1;
             next_usecol_index += 1;

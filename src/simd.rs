@@ -1,5 +1,60 @@
 use core::arch::x86_64::*;
 
+pub fn nth_newline_position(input: &[u8], target: usize) -> Option<usize> {
+    let mut total_lines = 0;
+    for simd_cursor in (0..(input.len() - 16)).step_by(16) {
+        let lines_this_chunk = unsafe {
+            let data = _mm_loadu_si128(input[simd_cursor..].as_ptr() as *const __m128i);
+            let mask = _mm_movemask_epi8(_mm_cmpeq_epi8(data, _mm_set1_epi8(b'\n' as i8)));
+            _popcnt32(mask) as usize
+        };
+        if total_lines + lines_this_chunk >= target {
+            return input
+                .iter()
+                .enumerate()
+                .skip(simd_cursor)
+                .filter(|(_, it)| **it == b'\n')
+                .nth(target - total_lines)
+                .map(|p| p.0);
+        }
+        total_lines += lines_this_chunk;
+    }
+
+    input
+        .iter()
+        .enumerate()
+        .skip(input.len() - (input.len() % 16))
+        .filter(|(_, it)| **it == b'\n')
+        .nth(target - total_lines)
+        .map(|p| p.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nth_newline() {
+        let input = b"1\n22\n#333\n4444\n55555\n66666\n";
+    }
+
+    #[test]
+    fn iter_lines() {
+        let input = b"1\n22\n333\n4444\n55555\n666666\nf";
+        for line in (&input[..]).simd_lines() {
+            println!("{:?}", std::str::from_utf8(line).unwrap());
+        }
+    }
+
+    #[test]
+    fn iter_words() {
+        let input = b"1 22 333 4444 55555 666666 f";
+        for line in (&input[..]).simd_words() {
+            println!("{:?}", std::str::from_utf8(line).unwrap());
+        }
+    }
+}
+
 pub trait SimdLinesIter<'a> {
     fn simd_lines(&self) -> SimdLines<'a>;
 }
@@ -58,39 +113,22 @@ pub fn find_newline(input: &[u8]) -> usize {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn lines() {
-        let input = b"1\n22\n333\n4444\n55555\n666666\nf";
-        for line in (&input[..]).simd_lines() {
-            println!("{:?}", std::str::from_utf8(line).unwrap());
-        }
-    }
-
-    #[test]
-    fn words() {
-        let input = b"1 22 333 4444 55555 666666 f";
-        for line in (&input[..]).simd_words() {
-            println!("{:?}", std::str::from_utf8(line).unwrap());
-        }
-    }
-}
-
 pub trait SimdWordsIter<'a> {
     fn simd_words(&self) -> SimdWords<'a>;
 }
 
 impl<'a> SimdWordsIter<'a> for &'a [u8] {
     fn simd_words(&self) -> SimdWords<'a> {
-        SimdWords { remaining: *self }
+        SimdWords {
+            remaining: *self,
+            state: None,
+        }
     }
 }
 
 pub struct SimdWords<'a> {
     remaining: &'a [u8],
+    state: Option<u32>,
 }
 
 impl<'a> std::iter::Iterator for SimdWords<'a> {

@@ -3,10 +3,15 @@ from loadtxt._native import ffi, lib
 import warnings
 
 
-def loadtxt(filename, comments="#", skiprows=0, usecols=None):
+def loadtxt(filename, comments="#", skiprows=0, usecols=None, max_rows=None):
     rows_ptr = ffi.new("uintptr_t *")
     cols_ptr = ffi.new("uintptr_t *")
     error_ptr = ffi.new("char **")
+    if max_rows is not None:
+        max_rows_ptr = ffi.new("uint64_t *")
+        max_rows_ptr[0] = max_rows
+    else:
+        max_rows_ptr = ffi.NULL
 
     if usecols is not None:
         usecols = np.array(usecols, dtype=np.uint64)
@@ -17,6 +22,7 @@ def loadtxt(filename, comments="#", skiprows=0, usecols=None):
             skiprows,
             ffi.cast("uint64_t *", ffi.from_buffer(usecols)),
             usecols.shape[0],
+            max_rows_ptr,
             rows_ptr,
             cols_ptr,
             error_ptr,
@@ -28,6 +34,7 @@ def loadtxt(filename, comments="#", skiprows=0, usecols=None):
             skiprows,
             ffi.NULL,
             0,
+            max_rows_ptr,
             rows_ptr,
             cols_ptr,
             error_ptr,

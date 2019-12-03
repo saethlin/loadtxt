@@ -2,10 +2,11 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
 
 mod checked;
-mod simd;
+//mod simd;
 use checked::loadtxt_checked;
 use checked::Chunk;
 
+// This could be done in parallel, but is it worth it?
 #[no_mangle]
 pub unsafe extern "C" fn loadtxt_flatten_chunks(chunks: *mut c_void, output: *mut f64) {
     let chunks: Box<Vec<Chunk<f64>>> = Box::from_raw(chunks as *mut Vec<Chunk<f64>>);
@@ -14,19 +15,6 @@ pub unsafe extern "C" fn loadtxt_flatten_chunks(chunks: *mut c_void, output: *mu
         std::ptr::copy_nonoverlapping(chunk.data.as_ptr(), output.offset(start), chunk.data.len());
         start += chunk.data.len() as isize;
     }
-    /*
-    let mut data = vec![0.0f64; chunks.iter().map(|c| c.data.len()).sum()];
-    let mut remaining = &mut data[..];
-    pool.scoped(|scope| {
-        for chunk in &chunks {
-            let (left, right) = remaining.split_at_mut(chunk.data.len());
-            scope.execute(move || {
-                left.copy_from_slice(&chunk.data);
-            });
-            remaining = right;
-        }
-    });
-    */
 }
 
 #[no_mangle]
@@ -36,6 +24,7 @@ pub unsafe extern "C" fn loadtxt_get_chunks(
     skiprows: usize,
     usecols: *const u64,
     n_usecols: usize,
+    max_rows_ptr: *const u64,
     rows: *mut usize,
     cols: *mut usize,
     error: *mut *const c_char,
@@ -53,10 +42,21 @@ pub unsafe extern "C" fn loadtxt_get_chunks(
         None
     };
 
-    match loadtxt_checked(filename, comments, skiprows, usecols) {
+    let max_rows = if max_rows_ptr.is_null() {
+        None
+    } else {
+        Some(*max_rows_ptr)
+    };
+
+    match loadtxt_checked(filename, comments, skiprows, usecols, max_rows) {
         Ok(chunks) => {
+            let n_elements = chunks.iter().map(|c| c.data.len()).sum::<usize>();
+            if n_elements == 0 {
+                return Box::leak(Box::new(Vec::new())) as *const Vec<crate::checked::Chunk<f64>>
+                    as *const c_void;
+            }
             *rows = chunks.iter().map(|c| c.rows).sum();
-            *cols = chunks.iter().map(|c| c.data.len()).sum::<usize>() / *rows;
+            *cols = n_elements / *rows;
             Box::leak(Box::new(chunks)) as *const Vec<crate::checked::Chunk<f64>> as *const c_void
         }
         Err(e) => {
