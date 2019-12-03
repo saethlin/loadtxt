@@ -1,20 +1,33 @@
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
+use std::sync::{Arc, Mutex};
+
+use scoped_threadpool::Pool;
 
 mod checked;
 //mod simd;
 use checked::loadtxt_checked;
 use checked::Chunk;
 
-// This could be done in parallel, but is it worth it?
+lazy_static::lazy_static! {
+    pub static ref POOL: Arc<Mutex<Pool>> = Arc::new(Mutex::new(Pool::new(num_cpus::get() as u32)));
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn loadtxt_flatten_chunks(chunks: *mut c_void, output: *mut f64) {
     let chunks: Box<Vec<Chunk<f64>>> = Box::from_raw(chunks as *mut Vec<Chunk<f64>>);
-    let mut start = 0isize;
-    for chunk in chunks.iter() {
-        std::ptr::copy_nonoverlapping(chunk.data.as_ptr(), output.offset(start), chunk.data.len());
-        start += chunk.data.len() as isize;
-    }
+    let num_numbers = chunks.iter().map(|c| c.data.len()).sum::<usize>();
+
+    let mut remaining = std::slice::from_raw_parts_mut(output, num_numbers);
+    POOL.lock().unwrap().scoped(|scope| {
+        for chunk in chunks.into_iter() {
+            let (this, rem) = remaining.split_at_mut(chunk.data.len());
+            remaining = rem;
+            scope.execute(move || {
+                this.copy_from_slice(&chunk.data[..]);
+            });
+        }
+    });
 }
 
 #[no_mangle]

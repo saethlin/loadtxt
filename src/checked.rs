@@ -123,8 +123,7 @@ pub fn loadtxt_checked<T: FromLexical + Default + Copy + Send>(
 
     let mut chunks: Vec<Result<Chunk<T>, _>> = vec![Ok(Chunk::default()); ncpu];
     // Divide into chunks for threads
-    let mut pool = scoped_threadpool::Pool::new(ncpu as u32);
-    pool.scoped(|scoped| {
+    crate::POOL.lock().unwrap().scoped(|scoped| {
         let mut slice_begin = 0;
         for this_thread_chunk in &mut chunks {
             let end_guess = usize::min(remaining.len(), slice_begin + chunksize);
