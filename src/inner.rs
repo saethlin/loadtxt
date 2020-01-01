@@ -10,15 +10,13 @@ pub struct Chunk<T> {
     pub rows: usize,
 }
 
-pub fn loadtxt_checked<T: FromLexical + Default + Copy + Send>(
+pub fn loadtxt<T: FromLexical + Default + Copy + Send>(
     filename: &str,
-    comments: &str,
+    comments: &[u8],
     skiprows: usize,
     usecols: Option<&[u64]>,
     max_rows: Option<u64>,
 ) -> Result<Vec<Chunk<T>>, Box<dyn std::error::Error>> {
-    let ncpu = num_cpus::get();
-
     let file = File::open(filename)?;
     // Cannot mmap empty files
     if file.metadata()?.len() == 0 {
@@ -63,7 +61,7 @@ pub fn loadtxt_checked<T: FromLexical + Default + Copy + Send>(
                     }
                     if remaining
                         .get(simd_cursor + mask_index + 1..)
-                        .map(|s| s.starts_with(comments.as_bytes()))
+                        .map(|s| s.starts_with(comments))
                         .unwrap_or(false)
                     {
                         ignore_next = true;
@@ -90,7 +88,7 @@ pub fn loadtxt_checked<T: FromLexical + Default + Copy + Send>(
                 ignore_next = false;
                 if remaining
                     .get(newline_index + 1..)
-                    .map(|s| s.starts_with(comments.as_bytes()))
+                    .map(|s| s.starts_with(comments))
                     .unwrap_or(false)
                 {
                     ignore_next = true;
@@ -101,7 +99,7 @@ pub fn loadtxt_checked<T: FromLexical + Default + Copy + Send>(
 
     let first_line = remaining
         .split(|c| *c == b'\n')
-        .skip_while(|line| line.starts_with(comments.as_bytes()))
+        .skip_while(|line| line.starts_with(comments))
         .next()
         .ok_or(format!(
             "No lines left in file after skipping {} rows",
@@ -115,15 +113,21 @@ pub fn loadtxt_checked<T: FromLexical + Default + Copy + Send>(
             .count()
     });
 
-    let chunksize = remaining.len() / ncpu;
+    let mut pool = crate::POOL
+        .try_lock()
+        .ok()
+        .and_then(|mut guard| guard.take())
+        .unwrap_or_else(|| scoped_threadpool::Pool::new(num_cpus::get() as u32));
+    let chunksize = remaining.len() / pool.thread_count() as usize;
 
     // Flag accessible to all threads so they can abort parsing as soon as any
     // thread fails to parse something
     let error_flag = Arc::new(AtomicBool::new(false));
 
-    let mut chunks: Vec<Result<Chunk<T>, _>> = vec![Ok(Chunk::default()); ncpu];
+    let mut chunks: Vec<Result<Chunk<T>, _>> =
+        vec![Ok(Chunk::default()); pool.thread_count() as usize];
     // Divide into chunks for threads
-    crate::POOL.lock().unwrap().scoped(|scoped| {
+    pool.scoped(|scoped| {
         let mut slice_begin = 0;
         for this_thread_chunk in &mut chunks {
             let end_guess = usize::min(remaining.len(), slice_begin + chunksize);
@@ -163,6 +167,10 @@ pub fn loadtxt_checked<T: FromLexical + Default + Copy + Send>(
         }
     });
 
+    if let Ok(mut guard) = crate::POOL.try_lock() {
+        guard.replace(pool);
+    }
+
     chunks
         .into_iter()
         .collect::<Result<Vec<_>, _>>()
@@ -171,7 +179,7 @@ pub fn loadtxt_checked<T: FromLexical + Default + Copy + Send>(
 
 fn parse_chunk<T>(
     chunk: &[u8],
-    comments: &str,
+    comments: &[u8],
     error_flag: &AtomicBool,
     required_columns: usize,
     parsed: &mut Vec<T>,
@@ -182,7 +190,7 @@ where
     let mut rows = 0;
     for line in chunk
         .split(|&b| b == b'\n')
-        .filter(|l| !l.starts_with(comments.as_bytes()))
+        .filter(|l| !l.starts_with(comments))
     {
         if error_flag.load(Ordering::Relaxed) {
             break;
@@ -213,7 +221,7 @@ where
 
 fn parse_chunk_usecols<T>(
     chunk: &[u8],
-    comments: &str,
+    comments: &[u8],
     error_flag: &AtomicBool,
     usecols: &[u64],
     parsed: &mut Vec<T>,
@@ -224,7 +232,7 @@ where
     let mut rows = 0;
     for line in chunk
         .split(|&byte| byte == b'\n')
-        .filter(|l| !l.starts_with(comments.as_bytes()))
+        .filter(|l| !l.starts_with(comments))
     {
         if error_flag.load(Ordering::Relaxed) {
             break;
