@@ -28,8 +28,8 @@ def loadtxt(filename,
             f"{dtype} is not a valid dtype for loadtxt. You may use int/numpy.int64 or float/numpy.float64"
         )
 
-    filename = filename.encode()
-    comments = comments.encode()
+    filename_bytes = filename.encode()
+    comments_bytes = comments.encode()
     if usecols is not None:
         usecols = np.array(usecols, dtype=np.uint64)
         usecols.sort()
@@ -40,10 +40,10 @@ def loadtxt(filename,
         usecols_len = 0
 
     args = [
-        filename,
-        len(filename),
-        comments,
-        len(comments),
+        filename_bytes,
+        len(filename_bytes),
+        comments_bytes,
+        len(comments_bytes),
         skiprows,
         usecols_ptr,
         usecols_len,
@@ -75,4 +75,4 @@ def loadtxt(filename,
         lib.loadtxt_flatten_chunks_i64(chunks_ptr,
                                    ffi.cast("int64_t *", array.ctypes.data))
 
-        return array
+    return array

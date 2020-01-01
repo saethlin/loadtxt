@@ -51,8 +51,7 @@ pub unsafe extern "C" fn loadtxt_flatten_chunks_i64(chunks: *mut c_void, output:
     flatten_chunks(&chunks, output);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn loadtxt_get_chunks_f64(
+unsafe fn loadtxt_get_chunks<T: Default + lexical_core::FromLexical>(
     filename: *const u8,
     filename_len: usize,
     comments: *const u8,
@@ -88,11 +87,13 @@ pub unsafe extern "C" fn loadtxt_get_chunks_f64(
         Ok(chunks) => {
             let n_elements = chunks.iter().map(|c| c.data.len()).sum::<usize>();
             if n_elements == 0 {
-                return std::ptr::null();
+                // Can't return a null ptr because that indicates there was an error
+                // Grumble grumble that was a bad idea, should fix it
+                return Box::leak(Box::new(Vec::new())) as *const Vec<Chunk<T>> as *const c_void;
             }
             *rows = chunks.iter().map(|c| c.rows).sum();
             *cols = n_elements / *rows;
-            Box::leak(Box::new(chunks)) as *const Vec<Chunk<f64>> as *const c_void
+            Box::leak(Box::new(chunks)) as *const Vec<Chunk<T>> as *const c_void
         }
         Err(e) => {
             let error_string = CString::new(e.to_string()).unwrap();
@@ -101,6 +102,35 @@ pub unsafe extern "C" fn loadtxt_get_chunks_f64(
             std::ptr::null()
         }
     }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn loadtxt_get_chunks_f64(
+    filename: *const u8,
+    filename_len: usize,
+    comments: *const u8,
+    comments_len: usize,
+    skiprows: usize,
+    usecols: *const u64,
+    usecols_len: usize,
+    max_rows_ptr: *const u64,
+    rows: *mut usize,
+    cols: *mut usize,
+    error: *mut *const c_char,
+) -> *const c_void {
+    loadtxt_get_chunks::<f64>(
+        filename,
+        filename_len,
+        comments,
+        comments_len,
+        skiprows,
+        usecols,
+        usecols_len,
+        max_rows_ptr,
+        rows,
+        cols,
+        error,
+    )
 }
 
 #[no_mangle]
@@ -117,40 +147,17 @@ pub unsafe extern "C" fn loadtxt_get_chunks_i64(
     cols: *mut usize,
     error: *mut *const c_char,
 ) -> *const c_void {
-    *rows = 0;
-    *cols = 0;
-    *error = std::ptr::null();
-
-    let filename = std::str::from_utf8(std::slice::from_raw_parts(filename, filename_len)).unwrap();
-    let comments = std::slice::from_raw_parts(comments, comments_len);
-
-    let usecols = if usecols_len == 0 {
-        None
-    } else {
-        Some(std::slice::from_raw_parts(usecols, usecols_len))
-    };
-
-    let max_rows = if max_rows_ptr.is_null() {
-        None
-    } else {
-        Some(*max_rows_ptr)
-    };
-
-    match loadtxt(filename, comments, skiprows, usecols, max_rows) {
-        Ok(chunks) => {
-            let n_elements = chunks.iter().map(|c| c.data.len()).sum::<usize>();
-            if n_elements == 0 {
-                return std::ptr::null();
-            }
-            *rows = chunks.iter().map(|c| c.rows).sum();
-            *cols = n_elements / *rows;
-            Box::leak(Box::new(chunks)) as *const Vec<Chunk<i64>> as *const c_void
-        }
-        Err(e) => {
-            let error_string = CString::new(e.to_string()).unwrap();
-            *error = error_string.as_ptr();
-            std::mem::forget(error_string);
-            std::ptr::null()
-        }
-    }
+    loadtxt_get_chunks::<i64>(
+        filename,
+        filename_len,
+        comments,
+        comments_len,
+        skiprows,
+        usecols,
+        usecols_len,
+        max_rows_ptr,
+        rows,
+        cols,
+        error,
+    )
 }

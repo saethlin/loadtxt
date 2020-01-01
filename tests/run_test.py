@@ -2,7 +2,9 @@ import numpy as np
 import loadtxt
 import glob
 
-for filename in sorted(glob.glob("*.txt")):
+files = sorted(glob.glob("*.txt"))
+print("test files:", files)
+for filename in files:
     print(filename)
     try:
         numpy = np.loadtxt(filename)
@@ -12,4 +14,8 @@ for filename in sorted(glob.glob("*.txt")):
         mine = loadtxt.loadtxt(filename)
     except Exception as e:
         print(e)
-    assert np.all(numpy == mine)
+
+    if not np.all(numpy == mine):
+        print(numpy.shape, numpy)
+        print(mine.shape, mine)
+        raise AssertionError
