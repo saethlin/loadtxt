@@ -30,73 +30,24 @@ pub fn loadtxt<T: FromLexical + Default + Copy + Send>(
         .last()
         .unwrap_or(&[]);
 
+    if let Some(max) = max_rows {
+        let end_index = remaining
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(_, byte)| *byte == b'\n')
+            .take(max as usize)
+            .next()
+            .map(|it| it.0)
+            .unwrap_or(remaining.len());
+        remaining = &contents[..end_index];
+    }
+
     if remaining.is_empty() {
         return Ok(Vec::new());
     }
 
-    // handle max_rows
-    if let Some(0) = max_rows {
-        // early exit to prevent underflow
-        return Ok(Vec::new());
-    }
-
-    if let Some(row_limit) = max_rows {
-        let mut rows_so_far = 0;
-        let mut simd_cursor = 0;
-        let mut ignore_next = false;
-        'outer: while simd_cursor < remaining.len().saturating_sub(16) {
-            unsafe {
-                use core::arch::x86_64::*;
-                let reg = _mm_loadu_si128(remaining[simd_cursor..].as_ptr() as *const __m128i);
-                let mut mask = _mm_movemask_epi8(_mm_cmpeq_epi8(reg, _mm_set1_epi8(b'\n' as i8)));
-                while mask != 0 {
-                    let mask_index = _mm_tzcnt_32(mask as u32) as usize;
-                    if !ignore_next {
-                        rows_so_far += 1;
-                        ignore_next = false;
-                        if rows_so_far == row_limit {
-                            remaining = &remaining[..simd_cursor + mask_index];
-                            break 'outer;
-                        }
-                    }
-                    if remaining
-                        .get(simd_cursor + mask_index + 1..)
-                        .map(|s| s.starts_with(comments))
-                        .unwrap_or(false)
-                    {
-                        ignore_next = true;
-                    }
-                    mask ^= 1 << mask_index;
-                }
-            }
-            simd_cursor += 16;
-        }
-        if rows_so_far != row_limit {
-            for newline_index in remaining
-                .iter()
-                .enumerate()
-                .skip(simd_cursor)
-                .filter_map(|(index, it)| if *it == b'\n' { Some(index) } else { None })
-            {
-                if !ignore_next {
-                    rows_so_far += 1;
-                    if rows_so_far == row_limit {
-                        remaining = &remaining[..newline_index];
-                        break;
-                    }
-                }
-                ignore_next = false;
-                if remaining
-                    .get(newline_index + 1..)
-                    .map(|s| s.starts_with(comments))
-                    .unwrap_or(false)
-                {
-                    ignore_next = true;
-                }
-            }
-        }
-    }
-
+    // Handle max_rows
     let first_line = remaining
         .split(|c| *c == b'\n')
         .skip_while(|line| line.starts_with(comments))
@@ -192,21 +143,21 @@ where
         .split(|&b| b == b'\n')
         .filter(|l| !l.starts_with(comments))
     {
-        if error_flag.load(Ordering::Relaxed) {
+        if error_flag.load(Ordering::SeqCst) {
             break;
         }
         let columns_this_row = parse_line(line, parsed)?;
         if columns_this_row != required_columns {
             if required_columns == 1 {
                 return Err(format!(
-                    "Expected 1 row, \
+                    "Expected 1 columns, \
                      but found {} when parsing \"{}\"",
                     columns_this_row,
                     String::from_utf8_lossy(line)
                 ));
             } else {
                 return Err(format!(
-                    "Expected {} rows, \
+                    "Expected {} columns, \
                      but found {} when parsing \"{}\"",
                     required_columns,
                     columns_this_row,
@@ -234,7 +185,7 @@ where
         .split(|&byte| byte == b'\n')
         .filter(|l| !l.starts_with(comments))
     {
-        if error_flag.load(Ordering::Relaxed) {
+        if error_flag.load(Ordering::SeqCst) {
             break;
         }
 
@@ -242,14 +193,14 @@ where
         if columns_this_row != usecols.len() {
             if usecols.len() == 1 {
                 return Err(format!(
-                    "Expected 1 row, \
+                    "Expected 1 column, \
                      but found {} when parsing \"{}\"",
                     columns_this_row,
                     String::from_utf8_lossy(line)
                 ));
             } else {
                 return Err(format!(
-                    "Expected {} rows, \
+                    "Expected {} columns, \
                      but found {} when parsing \"{}\"",
                     usecols.len(),
                     columns_this_row,
